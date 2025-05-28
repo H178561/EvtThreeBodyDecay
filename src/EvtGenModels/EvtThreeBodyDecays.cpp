@@ -118,6 +118,18 @@ double parseFractionlocal(const std::string& str)
     return std::stod(str);
 }
 
+double BlattWeisskopf(double q, double q0, int L, double d) {
+    double z = (q * d) * (q * d);
+    double z0 = (q0 * d) * (q0 * d);
+    
+    if (L == 0) return 1.0;
+    else if (L == 1) return sqrt((1.0 + z0) / (1.0 + z));
+    else if (L == 2) return sqrt((9.0 + 3.0*z0 + z0*z0) / (9.0 + 3.0*z + z*z));
+    // Weitere L-Werte hinzufügen
+    
+    return 1.0;
+  }
+
 // Initialisiere das Modell
 void EvtThreeBodyDecays::initProbMax()
 {
@@ -235,6 +247,9 @@ void EvtThreeBodyDecays::init()
 
 }
 
+std::vector<std::pair<std::string, double>> weighttuple; 
+double intensity = 0;
+
 void EvtThreeBodyDecays::decay( EvtParticle* p )
 {
     if ( !p ) {
@@ -291,7 +306,7 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     if(mandeldebug) std::cout << "Invariant masses: m0 = " << m0 << ", m1 = " << m1 << ", m2 = " << m2 << ", m3 = " << m3 << std::endl;
     
 
-
+    //std::vector<std::pair<std::string, double>> weighttuple; 
 
     auto chains = decayDescription["chains"];
     auto final_state = decayDescription["kinematics"]["final_state"];
@@ -415,7 +430,62 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 }
                 //Ps = {0,0,0,0};
 
-                auto Xlineshape = BreitWigner( mass, width );
+
+                ///////  Blatt Weisskopf Faktoren  ///////
+                // Berechne Zerfallsimpulse für Blatt-Weisskopf-Formfaktoren
+                double q = 0.0, q0 = 0.0;
+                double formFactor = 1.0;
+
+                // Bestimme die aktuelle invariante Masse basierend auf der Topologie
+                int k = topology[1].get<int>();
+                double invariantMassSq = 0.0;
+
+                // Wähle die richtige Mandelstam-Variable basierend auf Topologie
+                if (k == 1) invariantMassSq = σs[0];      // s12
+                else if (k == 2) invariantMassSq = σs[1]; // s23
+                else if (k == 3) invariantMassSq = σs[2]; // s31
+
+                double invariantMass = sqrt(invariantMassSq);
+
+                // Berechne q bei aktueller invarianter Masse
+                if (invariantMassSq > pow(ma + mb, 2)) {
+                    q = 0.5 * sqrt((invariantMassSq - pow(ma + mb, 2)) * 
+                                    (invariantMassSq - pow(ma - mb, 2))) / invariantMass;
+                }
+
+                // Berechne q0 bei Resonanzmasse
+                if (mass*mass > pow(ma + mb, 2)) {
+                    q0 = 0.5 * sqrt((mass*mass - pow(ma + mb, 2)) * 
+                                    (mass*mass - pow(ma - mb, 2))) / mass;
+                }
+
+                // Überprüfe auf vorhandene Formfaktoren in den Vertices
+                for (const auto& vertex : chain["vertices"]) {
+                    if (vertex.contains("formfactor") && !vertex["formfactor"].get<std::string>().empty()) {
+                        std::string formfactorName = vertex["formfactor"];
+                        if (functions.find(formfactorName) != functions.end()) {
+                            const auto& ff = functions[formfactorName];
+                            double radius = ff["radius"];
+                            int L = ff["l"];
+                            formFactor *= BlattWeisskopf(q, q0, L, radius);
+                            
+                            if(deubevt) {
+                                std::cout << "Formfaktor: " << formfactorName 
+                                        << ", q=" << q << ", q0=" << q0 
+                                        << ", L=" << L << ", radius=" << radius 
+                                        << ", Wert=" << BlattWeisskopf(q, q0, L, radius) << std::endl;
+                            }
+                        }
+                    }
+                }
+
+                // Modifiziere das Breit-Wigner mit dem Formfaktor
+                auto originalBreitWigner = BreitWigner(mass, width);
+                auto Xlineshape = [originalBreitWigner, formFactor](double s) -> complex {
+                    return originalBreitWigner(s) * formFactor;
+                };
+
+                auto Xlineshape2 = BreitWigner(mass, width);
 
                 // Get k from topology
                 int kint = topology[1].get<int>();    // Convert from 1-based to 0-based index
@@ -433,7 +503,7 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 ThreeBodyParities Ps = {'+', '-', '-', '+'};
 
                 // Create DecayChain
-                auto dc = createDecayChainCoupling( kint, Xlineshape, jp, tbs, RecouplingType::NoRecoupling, hel, false, RecouplingType::ParityRecoupling, par, par_sign );
+                auto dc = createDecayChainCoupling( kint, Xlineshape2, jp, tbs, RecouplingType::NoRecoupling, hel, false, RecouplingType::ParityRecoupling, par, par_sign );
                 if(deubevt) std::cout << weight << std::endl;
                 MandelstamTuple sigma = {
                     std::pow( ( daughtermass[0] + daughtermass[1] ), 2 ),
@@ -455,7 +525,30 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 }
 
                 model.add(dc, resonanceName, weight);
-                //amplitude = amplitude(dc, sigma)
+                intensity += tbDecays.intensity( *dc, σs, kint);
+                //std::cout << resonanceName << "Intensity: " << tbDecays.intensity( *dc, σs, kint) << std::endl;
+                //std::cout << resonanceName << "Weight Intensity: " << tbDecays.intensity( *dc, σs, kint , weight) << std::endl;
+
+                // Find existing entry for this resonance or add a new one
+                bool found = false;
+                for (size_t i = 0; i < weighttuple.size(); i++) {
+                    if (resonanceName == weighttuple[i].first) {
+                        // Update existing entry
+                        weighttuple[i].second += tbDecays.intensity(*dc, σs, kint);
+                        found = true;
+                        if(deubevt) std::cout << "Updated entry for " << resonanceName << std::endl;
+                        break; // Found the matching entry, no need to continue the loop
+                    }
+                }
+
+                // If no entry exists for this resonance, add a new one
+                if (!found) {
+                    weighttuple.push_back(std::make_pair(resonanceName, tbDecays.intensity(*dc, σs, kint)));
+                    if(deubevt) std::cout << "Added new entry for " << resonanceName << std::endl;
+                }
+
+                
+                //weighttuple.push_back(std::make_pair(resonanceName, tbDecays.intensity(*dc, σs, kint)));//amplitude = amplitude(dc, sigma)
                 //amplitude = amplitude(dc, sigma, two_λs);
 
                 //std::array = {
@@ -465,6 +558,11 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 //A_chain_values[i] = aligned_amplitude(chain, invariants, masses); // matrices in helicities [+1/2,-1/2] x [+1/2,-1/2]
             }
         }
+    }
+    std::cout << "Intensity: " << intensity << std::endl;
+    std::cout << "Fraction:" << std::endl;
+    for (const auto& wtup : weighttuple) {
+        std::cout << wtup.first << " " << wtup.second/intensity << std::endl;
     }
 
 
@@ -496,6 +594,9 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     vertex( 1, 0, amplitude[1][0] );
     vertex( 1, 1, amplitude[1][1] );
     if(deubevt) EvtGenReport( EVTGEN_EMERGENCY, "EvtGen" ) << "break" << std::endl;
+
+
+    //std::cout << "Intensity: " << intensity << std::endl;   
 
 }
 

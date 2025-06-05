@@ -27,7 +27,8 @@ using json = nlohmann::json;
 
 bool deubevt = false;
 bool mandeldebug = false;
-bool fractionout = true; // Für Debugging-Zwecke, um Brüche auszugeben
+bool fractionout = false; // Für Debugging-Zwecke, um Brüche auszugeben
+bool ffdebug = false; // Für Debugging-Zwecke, um Formfaktoren auszugeben
 
 // Konstruktor
 EvtThreeBodyDecays::EvtThreeBodyDecays()
@@ -131,10 +132,10 @@ double BlattWeisskopfold(double q, double q0, int L, double d) {
     return 1.0;
   }
 
-double BlattWeisskopf(double q, double q0, int L, double d) {
+double BlattWeisskopf(double q, int L, double d) {
     // Calculate z² and z0²
     double z2 = (q * d) * (q * d);
-    double z02 = (q0 * d) * (q0 * d);
+    //double z02 = (q0 * d) * (q0 * d);
     
     // Return appropriate factor based on angular momentum
     switch(L) {
@@ -143,12 +144,12 @@ double BlattWeisskopf(double q, double q0, int L, double d) {
             
         case 1:
             // P-wave: sqrt(z0²/chi_1(z0²) / z²/chi_1(z²))
-            return sqrt((z02 / (1.0 + z02)) / (z2 / (1.0 + z2)));
+            return sqrt( ( z2) / (1.0 + z2));
             
         case 2:
             // D-wave: sqrt(z0⁴/chi_2(z0²) / z⁴/chi_2(z²))
-            return sqrt((z02*z02 / (9.0 + 3.0*z02 + z02*z02)) / 
-                        (z2*z2 / (9.0 + 3.0*z2 + z2*z2)));
+            return sqrt( (z2*z2)/ 
+                         (9.0 + 3.0*z2 + z2*z2));
             
         default:
             return 1.0;  // Return 1.0 for unsupported L values
@@ -167,12 +168,26 @@ double breakup(double M, double m1, double m2) {
     return 0.5 * std::sqrt(lambda) / M;
 }
 
+
+double estimateMaxProb(const std::vector<double>& formfactors, double baseProb = 1.0) {
+    double factor = 1.0;
+    for (double ff : formfactors) {
+        // Quadratische Wirkung des Formfaktors auf die Amplitude
+        factor *= (ff * ff);
+    }
+
+    // Sicherheitsfaktor, um Ausreißer abzufangen
+    return baseProb * factor * 2.0; // oder * 5.0 bei mehr Absicherung
+}
+
 // Initialisiere das Modell
 void EvtThreeBodyDecays::initProbMax()
 {
     setProbMax( 1500000 );
-    //setProbMax( 10000 );
+    setProbMax( 10000 );
+    //setProbMax( 10000000 );    // Setze die maximale Wahrscheinlichkeit für den Zerfall
 
+    
 }
 
 
@@ -291,6 +306,8 @@ std::array<double, 9> intensities;
 
 double intensity = 0;
 double newtotalintensity = 0;
+std::vector<double> compintens;
+std::array<double, 20> compintens2;
 int num = 0;
 
 void EvtThreeBodyDecays::decay( EvtParticle* p )
@@ -343,6 +360,8 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     double s12 = (p1 + p2).mass2();
     double s23 = (p2 + p3).mass2();
     double s31 = (p3 + p1).mass2();
+
+    std::vector<double> formfactors;
 
     MandelstamTuple σs = {s23, s31, s12};
     //σs = {s12, s23, s31};
@@ -477,10 +496,9 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
 
                 ///////  Blatt Weisskopf Faktoren  ///////
                 // Berechne Zerfallsimpulse für Blatt-Weisskopf-Formfaktoren
-                double q = 0.0, q0 = 0.0;
+                double qold = 0.0, q0old = 0.0;
                 double formFactor1 = 1.0;
                 double formFactor2 = 1.0;
-                int intformfactor = 1;
 
                 // Bestimme die aktuelle invariante Masse basierend auf der Topologie
                 int k = topology[1].get<int>();
@@ -495,17 +513,19 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
 
                 // Berechne q bei aktueller invarianter Masse
                 if (invariantMassSq > pow(ma + mb, 2)) {
-                    q = 0.5 * sqrt((invariantMassSq - pow(ma + mb, 2)) * 
+                    qold = 0.5 * sqrt((invariantMassSq - pow(ma + mb, 2)) * 
                                     (invariantMassSq - pow(ma - mb, 2))) / invariantMass;
                 }
 
                 // Berechne q0 bei Resonanzmasse
                 if (mass*mass > pow(ma + mb, 2)) {
-                    q0 = 0.5 * sqrt((mass*mass - pow(ma + mb, 2)) * 
+                    q0old = 0.5 * sqrt((mass*mass - pow(ma + mb, 2)) * 
                                     (mass*mass - pow(ma - mb, 2))) / mass;
                 }
 
-                auto Xlineshape2 = BreitWigner(mass, width);
+                
+
+                auto Xlineshapeold = BreitWigner(mass, width);
                 // Log the calculated q and q0 for deubevtging
 
                 // Überprüfe auf vorhandene Formfaktoren in den Vertices
@@ -516,38 +536,96 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                             const auto& ff = functions[formfactorName];
                             double radius = ff["radius"];
                             int L = ff["l"];
-                            if(intformfactor == 1) {
-                                
-                                formFactor1 *= BlattWeisskopf(q, q0, L, radius);
-                                intformfactor = 2; // Setze Formfaktor-Typ auf 1
-                            } else if(intformfactor == 2) {
-                                formFactor2 *= BlattWeisskopf(q, q0, L, radius);
-                            } else {
-                                EvtGenReport( EVTGEN_ERROR, "EvtGen" )
-                                    << "Unbekannter Formfaktor-Typ: " << intformfactor << std::endl;
-                            }
                             
-                            if(deubevt) {
-                                std::cout << "Formfaktor: " << formfactorName 
-                                        << ", q=" << q << ", q0=" << q0 
-                                        << ", L=" << L << ", radius=" << radius 
-                                        << ", Wert=" << BlattWeisskopf(q, q0, L, radius) << std::endl;
+                            
+                            auto node = vertex["node"];
+                            if (node.is_array() && node[0].is_array()) {
+                                int ind1 = node[0][0].get<int>() - 1; // 1-based to 0-based index
+                                int ind2 = node[0][1].get<int>() - 1; // 1-based to 0-based index
+                                int ind3 = node[1].get<int>() - 1; // 1-based to 0-based index
+
+                                double m0 = p->mass();
+                                double m1 = p->getDaug(ind1)->mass();
+                                double m2 = p->getDaug(ind2)->mass();
+                                double m3 = p->getDaug(ind3)->mass();
+                                p1 = p->getDaug(ind1)->getP4();
+                                p2 = p->getDaug(ind2)->getP4();
+                                p3 = p->getDaug(ind3)->getP4();
+
+                                double ssub = (p1+p2).mass2(); // Invariant mass squared of [3,1,2]
+                                double msub = sqrt(ssub);
+
+                                double q = breakup(m0, msub, m3);
+                                //double q0 = breakup(m0, mass, m3);
+
+                                // Log the calculated q and q0 for deubevtging
+                                // Boost particle 3 into resonance rest frame (p1 + p2)
+                                /*
+                                EvtVector4R resP4 = p1 + p2;
+                                EvtVector4R p3_boosted = p3;
+                                p3_boosted.applyBoostTo(resP4);
+
+                                q = p3_boosted.d3mag();             // boosted momentum*/
+                               
+
+                                
+                                formFactor1 *= BlattWeisskopf(q, L, radius);
+                                formfactors.push_back(formFactor1);
+
+                                if(ffdebug) {
+                                std::cout << resonanceName << " Formfactor: " << formfactorName << std::endl;
+                                std::cout << "q: " << q << ", q0: " << " l " << L << " r " << radius << std::endl;
+                                std::cout << "Formfactor1: " << formFactor1 << std::endl;
+                                }
+                        
+
+                            } else {
+                                int ind1 = node[0].get<int>() - 1; // 1-based to 0-based index
+                                int ind2 = node[1].get<int>() - 1; // 1-based to 0-based index
+
+                                double m1 = p->getDaug(ind1)->mass();
+                                double m2 = p->getDaug(ind2)->mass();
+
+                                p1 = p->getDaug(ind1)->getP4();
+                                p2 = p->getDaug(ind2)->getP4();
+                                double ssub = (p1+p2).mass2(); // Invariant mass squared of [3,1]
+                                double msub = sqrt(ssub);
+
+                                // Impuls bei gegebener (laufender) Masse
+                                double q = breakup(msub, m1, m2);
+
+                                // Impuls bei Resonanzmasse
+                                //double q0 = breakup(mass, m1, m2);
+
+                                formFactor2 *= BlattWeisskopf(q, L, radius);
+                                formfactors.push_back(formFactor2);
+
+                                if(ffdebug) {
+                                std::cout << resonanceName << " Formfactor: " << formfactorName << std::endl;
+                                std::cout << "q: " << q << ", q0: "  << " l " << L << " r " << radius << std::endl;
+                                std::cout << "Formfactor2: " << formFactor2 << std::endl;
+                                }
                             }
+
+                            
+                           
 
                             //Xlineshape2 = Xlineshape2 * complex(formFactor,formFactor); // Modifiziere den Breit-Wigner mit dem Formfaktor
                         }
                     }
                 }
-
-
+                //std::cout << resonanceName << "Formfaktor1: " << formFactor1 << std::endl;
+                //std::cout << resonanceName << "Formfaktor2: " << formFactor2 << std::endl;
+                
+                
 
                 // Modifiziere das Breit-Wigner mit dem Formfaktor
                 auto originalBreitWigner = BreitWigner(mass, width);
                 auto Xlineshape = [originalBreitWigner, formFactor1,formFactor2](double s) -> complex {
-                    return originalBreitWigner(s) * formFactor1*formFactor2;
+                    return originalBreitWigner(s) * formFactor1 * formFactor2;
                 };
-                //std::cout << "XLineshape: " << Xlineshape(0.0) << std::endl;
-                //std::cout << "Xlineshape2: " << Xlineshape2(0.0) << std::endl;
+                //std::cout << resonanceName << "XLineshape: " << Xlineshape(0.0) << std::endl;
+                //std::cout << resonanceName << "Xlineshapeold: " << Xlineshapeold(0.0) << std::endl;
 
                 // Get k from topology
                 int kint = topology[1].get<int>();    // Convert from 1-based to 0-based index
@@ -565,13 +643,13 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 ThreeBodyParities Ps = {'+', '-', '-', '+'};
 
                 // Create DecayChain
-                auto dc = createDecayChainCoupling( kint, Xlineshape2, jp, tbs, RecouplingType::NoRecoupling, hel, false, RecouplingType::ParityRecoupling, par, par_sign );
+                auto dc = createDecayChainCoupling( kint, Xlineshape, jp, tbs, RecouplingType::NoRecoupling, hel, false, RecouplingType::ParityRecoupling, par, par_sign );
+                model.add(dc, resonanceName, weight);
+
                 if(deubevt) std::cout << weight << std::endl;
-                MandelstamTuple sigma = {
-                    std::pow( ( daughtermass[0] + daughtermass[1] ), 2 ),
-                    std::pow( ( daughtermass[1] + daughtermass[2] ), 2 ),
-                    std::pow( ( daughtermass[2] + daughtermass[0] ), 2 ) };
                 std::vector<double> two_λs = { 0.5, 0.5, 0.5 };
+
+                int weightint = 1;
 
                 Tensor4Dcomp A_chain_values = tbDecays.amplitude4dcomp( *dc, σs , 1);
                 if(deubevt) std::cout << "Single amp tensor:" << std::endl;
@@ -588,13 +666,18 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 //weight = complex(1.,1.);
                 //std::cout << resonanceName << weight << std::endl;
 
-                double realintensity;
+                double realintensity = 0;
                 for ( int i = 0; i < A_chain_values.size(); ++i ) {
                     for ( int j = 0; j < A_chain_values[0].size(); ++j ) {
                         for ( int k = 0; k < A_chain_values[0][0].size(); ++k ) {
                             for ( int z = 0; z < A_chain_values[0][0][0].size(); ++z ) {
-                                realintensity = A_chain_values[i][j][k][z].real() * A_chain_values[i][j][k][z].real() * weight.real() * weight.real() +
-                                                + A_chain_values[i][j][k][z].imag() * A_chain_values[i][j][k][z].imag() * weight.imag() * weight.imag();
+                                //realintensity += A_chain_values[i][j][k][z].real() * A_chain_values[i][j][k][z].real() * weight.real() * weight.real() +
+                                //                + A_chain_values[i][j][k][z].imag() * A_chain_values[i][j][k][z].imag() * weight.imag() * weight.imag();
+                                double amp_intensity = A_chain_values[i][j][k][z].real() * A_chain_values[i][j][k][z].real() * weight.real() * weight.real() +
+                                                A_chain_values[i][j][k][z].imag() * A_chain_values[i][j][k][z].imag() * weight.imag() * weight.imag();
+                                realintensity += amp_intensity; // Add intensity for this amplitude
+                                //std::cout << resonanceName << " Amplitude[" << i << "][" << j << "][" << k << "][" << z << "] = " 
+                                //          << A_chain_values[i][j][k][z] << weight << amp_intensity << std::endl;
                                 if(deubevt) std::cout << "Amplitude[" << i << "][" << j << "][" << k << "][" << z << "] = " << realintensity << std::endl;
                             }
                         }
@@ -602,9 +685,11 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 }
 
 
-
-                model.add(dc, resonanceName, weight);
-                //intensity += tbDecays.intensity( *dc, σs, kint);
+                bool frwithweight = true;
+                if (!frwithweight) {
+                    realintensity = tbDecays.intensity( *dc, σs, weightint ); // Calculate intensity without weight
+                }
+                
                 intensity += realintensity; // Add real intensity to total intensity
                 //std::cout << resonanceName << "Intensity: " << tbDecays.intensity( *dc, σs, kint) << std::endl;
                 //std::cout << resonanceName << "Weight Intensity: " << tbDecays.intensity( *dc, σs, kint , weight) << std::endl;
@@ -616,10 +701,14 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 for (size_t i = 0; i < weighttuple.size(); i++) {
                     if (resonanceName == weighttuple[i].first) {
                         // Update existing entry
-                        //weighttuple[i].second += tbDecays.intensity(*dc, σs, 1);
+                    
+                        //weighttuple[i].second += tbDecays.intensity(*dc, σs, kint, weight);
                         weighttuple[i].second += realintensity; // Add real intensity to existing entry
+                    
+                        //weighttuple[i].second += tbDecays.intensity(*dc, σs, 1);
+
                         found = true;
-                        if(deubevt) std::cout << "Updated entry for " << resonanceName << std::endl;
+                        //std::cout << "Updated entry for " << resonanceName << std::endl;
                         break; // Found the matching entry, no need to continue the loop
                     }
                 }
@@ -631,7 +720,7 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                     //weighttuple.push_back(std::make_pair(resonanceName, tbDecays.intensity(*dc, σs, kint)));
                     weighttuple.push_back(std::make_pair(resonanceName, realintensity));
 
-                    if(deubevt) std::cout << "Added new entry for " << resonanceName << std::endl;
+                    //std::cout << "Added new entry for " << resonanceName << std::endl;
                 }
 
                 
@@ -648,13 +737,12 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
         }
     }
     num++;
-    if(num%1000 == 0) {
-        if(fractionout) std::cout << "Intensity: " << intensity << std::endl;
-        if(fractionout) std::cout << "Fraction:" << std::endl;
-        for (const auto& wtup : weighttuple) {
-            if(fractionout) std::cout << wtup.first << " " << wtup.second/intensity << std::endl;
-        }
-    }
+    
+
+    double maxProbEstimate = estimateMaxProb(formfactors);
+    //std::cout << "Empfohlene maxProb für Kette " << ": " << maxProbEstimate << std::endl;
+
+
    
 
 
@@ -686,25 +774,46 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     vertex( 1, 0, amplitude[1][0] );
     vertex( 1, 1, amplitude[1][1] );
     if(deubevt) EvtGenReport( EVTGEN_EMERGENCY, "EvtGen" ) << "break" << std::endl;
-    /*
-    std::vector<double> compintens = model.component_intensities(σs, 1);
+    
+    compintens = model.component_intensities(σs, 1);
     int j = 0;
-    for (size_t i = 0; i < intensities.size()-1; i++) {
+    for (int i = 0; i < intensities.size()-1; i++) {
         intensities[i] += compintens[j] + compintens[j+1]; // Initialize intensities to zero
-        newtotalintensity += intensities[i];
-        std::cout << "Component " << i << ": " << intensities[i] << " " << intensities[i]/newtotalintensity << std::endl;
+        newtotalintensity += compintens[j] + compintens[j+1];
+        //std::cout << "Component " << i << ": " << intensities[i] << " " << intensities[i]/newtotalintensity << std::endl;
         
         j+= 2; // Increment j by 2 to access the next pair of components
 
     }
     intensities[8] += compintens[19] + compintens[18] + compintens[17] + compintens[16] ;
-    newtotalintensity += intensities[8]; // Add the last component intensity
+    newtotalintensity += compintens[19] + compintens[18] + compintens[17] + compintens[16] ; // Add the last component intensity
     
+    for (size_t i=0; i < compintens.size(); i++) {
+        compintens2[i] += (compintens[i]);
+    }
+
+
+    if(num%1000 == 0) {
+        if(fractionout) std::cout << "Intensity: " << intensity << std::endl;
+        if(fractionout) std::cout << "Fraction:" << std::endl;
+        for (const auto& wtup : weighttuple) {
+            if(fractionout) std::cout << wtup.first << " " << wtup.second/intensity << std::endl;
+        }
+    }
+
+    if(num%1000 == 0) {
     if(fractionout) 
     {std::cout << "Component intensities:" << std::endl;
     for (size_t i = 0; i < intensities.size(); i++) {
-        std::cout << "Intensity " << i << ": " << intensities[i]/newtotalintensity << std::endl;
+        std::cout << weighttuple[i].first << " Intensity " << i << ": " << intensities[i]/newtotalintensity << std::endl;
+    }}
+    /*
+    if(fractionout) 
+    {std::cout << "Component intensities2:" << std::endl;
+    for (size_t i = 0; i < compintens2.size(); i++) {
+        std::cout << "Intensity " << i << ": " << compintens2[i]/newtotalintensity << std::endl;
     }}*/
+    }
 
 
 }

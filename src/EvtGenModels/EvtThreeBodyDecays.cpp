@@ -15,6 +15,7 @@
 #include <nlohmann/json.hpp>
 #include "ThreeBodyDecays/ThreeBodyDecays.hh"
 #include "ThreeBodyDecays/ThreeBodyAmplitudeModel.hh"
+#include "ThreeBodyDecays/FormFactors.hh"
 
 #include <cmath>
 #include <complex>
@@ -29,7 +30,7 @@ bool deubevt = false;
 bool mandeldebug = false;
 bool fractionout = true; // Für Debugging-Zwecke, um Brüche auszugeben
 bool ffdebug =true; // Für Debugging-Zwecke, um Formfaktoren auszugeben
-bool compjulia = false; // debug - compare with julia results
+bool compjulia = true; // debug - compare with julia results
 
 
 // Konstruktor
@@ -334,6 +335,12 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     double mParent = EvtPDL::getMass( EvtPDL::getId( "Lambda_c+" ) );
 
     ThreeBodyMasses ms = {mDaug[0], mDaug[1], mDaug[2], mParent};
+    ms =  {0.938272046,
+          0.13957018,
+          0.493677,
+          2.28646}; // masses in GeV/c^2
+    
+   
     //ms = {0.938,0.494,0.140,2.286};
     ThreeBodyMasses mssquared = {mDaug[0] * mDaug[0], mDaug[1] * mDaug[1],
                                   mDaug[2] * mDaug[2], mParent * mParent};
@@ -363,7 +370,7 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     MandelstamTuple σs = {s23, s31, s12};
 
     if(compjulia ) {
-        σs = {1,3,2};
+        σs = {1.5,3.2,1.6714505793792584};
 
     }
     if(mandeldebug) std::cout << "Mandelstam variables: s12 = " << s12 << ", s23 = " << s23 << ", s31 = " << s31 << std::endl;
@@ -597,17 +604,18 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 //std::cout << resonanceName << "Formfaktor1: " << formFactor1 << std::endl;
                 //std::cout << resonanceName << "Formfaktor2: " << formFactor2 << std::endl;
                 
-                
+                int kint = topology[1].get<int>(); 
+
                 // Modifiziere das Breit-Wigner mit dem Formfaktor
                 auto originalBreitWigner = BreitWigner(mass, width);
                 auto Xlineshape = [originalBreitWigner, formFactor1,formFactor2](double s) -> complex {
                     return originalBreitWigner(s) * formFactor1 * formFactor2;
                 };
-                if(compjulia) std::cout << resonanceName << "XLineshape: " << Xlineshape(0.0) << std::endl;
-                if(compjulia) std::cout << resonanceName << "Xlineshapeold: " << Xlineshapeold(0.0) << " " << mass << " " << width << std::endl;
-                if(compjulia) std::cout << resonanceName << "FF " << formFactor1 << formFactor2 << std::endl;
+                if(compjulia) std::cout << resonanceName << "XLineshape: " << Xlineshape(σs[kint-1]) << " with s=" << σs[kint-1]<< std::endl;
+                if(compjulia) std::cout << resonanceName << "Xlineshapeold: " << Xlineshapeold(σs[kint-1]) << " " << mass << " " << width << std::endl;
+                if(compjulia) std::cout << resonanceName << "FF " << formFactor1 << " " << formFactor2 << std::endl;
                 // Get k from topology
-                int kint = topology[1].get<int>();    
+                   
 
                         if(deubevt) EvtGenReport( EVTGEN_INFO, "EvtGen" ) << "INFO" << std::endl;
                 
@@ -642,7 +650,18 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                         }
                     }
                     std::cout << "\n";
-                }}
+                }
+                for ( int i = 0; i < A_chain_values.size(); ++i ) {
+                        for ( int j = 0; j < A_chain_values[0].size(); ++j ) {
+                            for ( int k = 0; k < A_chain_values[0][0].size(); ++k ) {
+                                for ( int z = 0; z < A_chain_values[0][0][0].size(); ++z ) {
+                                    std::cout << A_chain_values[i][j][k][z]*weight << "\t";    // Tab für schöne Ausrichtung
+                                }
+                            }
+                        }
+                        std::cout << "\n";
+                    }}
+
                 //weight = complex(1.,1.);
                 //std::cout << resonanceName << weight << std::endl;
 
@@ -773,7 +792,7 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     modintens += compintens[19] + compintens[18] + compintens[17] + compintens[16] ;
 
     //newtotalintensity += modintens;
-    newtotalintensity += modintens; // Add the component intensities to the new total intensity
+    newtotalintensity += modelintensity; // Add the component intensities to the new total intensity
 
     for (size_t i=0; i < compintens.size(); i++) {
         compintens2[i] += (compintens[i]);
@@ -858,6 +877,36 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
         }
         std::cout << "Total intensity: " << newtotalintensity/num << std::endl;
 
+    }
+    }
+
+    if(compjulia){
+        std::cout << "Total intensity " << modelintensity << std::endl;
+
+        for (size_t i = 0; i < intensities.size(); i++) {
+        // Calculate running mean
+        double running_mean = intensities[i] / newtotalintensity;
+        
+        // Get individual fraction values from intensityfractions vector
+        if (i < intensityfractions.size() && !intensityfractions[i].empty()) {
+            // Calculate mean of stored fractions
+            double mean = std::reduce(intensityfractions[i].begin(), intensityfractions[i].end(), 0.0) / intensityfractions[i].size();
+            
+            // Calculate variance
+            double variance = 0.0;
+            for (const auto& value : intensityfractions[i]) {
+                variance += (value - mean) * (value - mean);
+            }
+            variance /= intensityfractions[i].size();
+            double stddev = std::sqrt(variance);
+            
+            std::cout << weighttuple[i].first << " Intensity " << i << ": " 
+                      << running_mean << " (Mean: " << mean << " ± " << stddev 
+                      << ", N=" << intensityfractions[i].size() << ")" << std::endl;
+        } else {
+            std::cout << weighttuple[i].first << " Intensity " << i << ": " 
+                      << running_mean << " (No variance data)" << std::endl;
+        }
     }
     }
     /*

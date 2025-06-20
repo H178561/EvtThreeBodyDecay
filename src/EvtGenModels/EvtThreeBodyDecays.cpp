@@ -149,17 +149,12 @@ double BlattWeisskopf(double q, int L, double d) {
     }
 }
 
-  double breakupMomentum(double m, double m1, double m2) {
+double breakup(double m, double m1, double m2) {
     return sqrt((m - (m1 + m2)) * (m + (m1 + m2))) * 
            sqrt((m - (m1 - m2)) * (m + (m1 - m2))) / (2*m);
 }
 
 
-double breakup(double M, double m1, double m2) {
-    if (M < m1 + m2) return 0.0;
-    double lambda = (M*M - (m1 + m2)*(m1 + m2)) * (M*M - (m1 - m2)*(m1 - m2));
-    return 0.5 * std::sqrt(lambda) / M;
-}
 
 
 double estimateMaxProb(const std::vector<double>& formfactors, double baseProb = 1.0) {

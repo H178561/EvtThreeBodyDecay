@@ -250,6 +250,7 @@ void EvtThreeBodyDecays::init()
     }
 
     auto final_state = decayDescription["kinematics"]["final_state"];
+    auto initial_state = decayDescription["kinematics"]["initial_state"];
     auto topology = decayDescription["reference_topology"];
 
     // Lade alle Funktionen aus der JSON-Datei in eine Lookup-Tabelle
@@ -298,20 +299,12 @@ void EvtThreeBodyDecays::init()
 
 }
 
-std::vector<std::pair<std::string, double>> weighttuple; 
-std::array<double, 9> intensities;
-
-
-double intensity = 0;
-double newtotalintensity = 0;
-//std::vector<double> compintens;
-std::array<double, 20> compintens2;
 int num = 0;
-
-std::array<std::vector<double>,9> intensityfractions;
-std::array<std::vector<double>,20> allintensityfractions;
-std::array<std::vector<double>,9> allcompintensities;
 std::vector<double> allmodelintensities;
+double totalintensity = 0;
+std::vector<std::pair<std::string, std::vector<double>>> weighttuple; 
+int testprint = 0;
+
 
 
 void EvtThreeBodyDecays::decay( EvtParticle* p )
@@ -332,25 +325,28 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     
     // Create random Mandelstam variables for the decay
     ThreeBodyDecays tbDecays;
-    double mDaug[3] = {
-        EvtPDL::getMeanMass( EvtPDL::getId( "p+" ) ),
-        EvtPDL::getMeanMass( EvtPDL::getId( "pi+" ) ),
-        EvtPDL::getMeanMass( EvtPDL::getId( "K-" ) ),
-    };
-    double mParent = EvtPDL::getMass( EvtPDL::getId( "Lambda_c+" ) );
+  
 
-    ThreeBodyMasses ms = {mDaug[0], mDaug[1], mDaug[2], mParent};
-    ms =  {0.938272046,
-          0.13957018,
-          0.493677,
-          2.28646}; // masses in GeV/c^2
+    auto final_state = decayDescription["kinematics"]["final_state"];
+    auto initial_state = decayDescription["kinematics"]["initial_state"];
+
+
+    double mParent = initial_state["mass"];
+    double mDaug1 = final_state[0]["mass"];
+    double mDaug2 = final_state[1]["mass"];
+    double mDaug3 = final_state[2]["mass"];
+
+    ThreeBodyMasses ms = {mDaug1, mDaug2, mDaug3, mParent};
+
     
-   
-    //ms = {0.938,0.494,0.140,2.286};
-    ThreeBodyMasses mssquared = {mDaug[0] * mDaug[0], mDaug[1] * mDaug[1],
-                                  mDaug[2] * mDaug[2], mParent * mParent};
     //ThreeBodySpins spins = {1, 0, 0, 1};    // h0=1 bezieht sich auf den Spin des Elternteilchens
-    ThreeBodySpins spins = {1,0,0,1};    // h0=1 bezieht sich auf den Spin des Elternteilchens
+    int spindaug1 = EvtSpinType::getSpin2(p->getDaug(0)->getSpinType());
+    int spindaug2 = EvtSpinType::getSpin2(p->getDaug(1)->getSpinType());
+    int spindaug3 = EvtSpinType::getSpin2(p->getDaug(2)->getSpinType());
+    int spin = EvtSpinType::getSpin2(p->getSpinType());
+
+
+    ThreeBodySpins spins = {spindaug1, spindaug2, spindaug3, spin};    // h0=1 bezieht sich auf den Spin des Elternteilchens
     ThreeBodySystem tbs  = {ms, spins};
     MandelstamTuple σstest = tbDecays.x2σs({0.3, 0.3}, ms, 1);
 
@@ -360,11 +356,7 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     EvtVector4R ppi = p->getDaug(1)->getP4();
     EvtVector4R pk = p->getDaug(2)->getP4();
     
-    // Calculate invariant masses
-    double mLc = pLc.mass();
-    double mp = pp.mass();
-    double mpi = ppi.mass();
-    double mk = pk.mass();
+   
 
     double s12 = (pp + ppi).mass2();
     double s23 = (ppi + pk).mass2();
@@ -379,22 +371,98 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
 
     }
     if(mandeldebug) std::cout << "Mandelstam variables: s12 = " << s12 << ", s23 = " << s23 << ", s31 = " << s31 << std::endl;
-    if(mandeldebug) std::cout << "Invariant masses: mLc = " << mLc << ", mp = " << mp << ", mpi = " << mpi << ", mk = " << mk << std::endl;
+    if(mandeldebug) std::cout << "Invariant masses: mLc = " << mParent << ", mp = " << mDaug1 << ", mpi = " << mDaug2 << ", mk = " << mDaug3 << std::endl;
     
     //σs = {1,3,2};
     //std::vector<std::pair<std::string, double>> weighttuple; 
+    std::cout << "Test print: " << testprint << std::endl;
+    testprint++;
 
     auto chains = decayDescription["chains"];
-    auto final_state = decayDescription["kinematics"]["final_state"];
     ThreeBodyAmplitudeModel model;
-    std::vector<std::string> paritylist = {"+", "-", "+", "-"};
 
     for ( const auto& chain : chains ) {
         std::string resonanceName = chain["name"];
         std::string paramType = chain["propagators"][0]["parametrization"];
-        if ( functions.find( paramType ) != functions.end() ) {
-            const auto& func = functions[paramType];
+
+        const auto& func = functions[paramType];
             auto topology = chain["topology"];
+            auto LineshapeName = func["name"];
+
+            
+            int kint = topology[1].get<int>(); 
+
+            int id1 = topology[0][0];
+            int id2 = topology[0][1];
+            int id3 = topology[1];
+            id1 = id1 - 1;
+            id2 = id2 - 1;
+            id3 = id3 - 1;
+
+            double m1 = p->getDaug(id1)->mass();
+            double m2 = p->getDaug(id2)->mass();
+            double m3 = p->getDaug(id3)->mass();
+
+
+            // Get spin-parity and parities from JSON
+            std::string spin_str = chain["propagators"][0]["spin"];
+            if(deubevt) std::cout << spin_str << std::endl;
+            std::string parity_str = chain["vertices"][1]["parity_factor"];
+            int vertixy_ind = 0;
+            std::string jp = spin_str + parity_str;
+            if(deubevt) std::cout << jp << std::endl;
+            complex weight = evtparseComplex(chain["weight"]);
+
+
+            std::vector<std::array<double, 3>> helicities;
+                
+                
+            for ( const auto& vertice : chain["vertices"] )
+            {
+                double helfactor1 = parseHelicity( vertice["helicities"][0]);
+                double helfactor2 = parseHelicity( vertice["helicities"][1]);
+                double heltype;
+                if ( vertice["type"] == "parity" ) {
+                    std::string formfactor = vertice["formfactor"];
+                    heltype = 1;
+                }
+                if ( vertice["type"] == "helicity" ) {
+                    std::string formfactor = vertice["formfactor"];
+                    heltype = 0;
+                }
+                helicities.push_back({ helfactor1, helfactor2, heltype });
+            }
+            
+            int helfactor1 = parseHelicity( chain["vertices"][0]["helicities"][0])*2;
+            int helfactor2 = parseHelicity( chain["vertices"][0]["helicities"][1])*2;
+            std::array<int, 2> hel = { helfactor1, helfactor2 };
+            if(deubevt) {
+                std::cout << "Helicities: " << helfactor1 << " " << helfactor2 << std::endl;
+            }
+
+            int parfactor1 = parseHelicity( chain["vertices"][1]["helicities"][0])*2;
+            int parfactor2 = parseHelicity( chain["vertices"][1]["helicities"][1])*2;
+            std::array<int, 2> par = { parfactor1, parfactor2 };
+            std::string par_type = chain["vertices"][1]["parity_factor"];
+            bool par_sign = false;
+            if(par_type == "+") {
+                par_sign = true;
+            } else if(par_type == "-") {
+                par_sign = false;
+            } else {
+                EvtGenReport( EVTGEN_ERROR, "EvtGen" )
+                    << "Unbekannter Paritätsfaktor: " << par_type << std::endl;
+            }
+
+            if(deubevt) {
+                std::cout << "Parity factors: " << parfactor1 << " " << parfactor2 << std::endl;
+                std::cout << "Parity sign: " << par_sign << std::endl;
+            }
+            
+
+            std::function<complex(double)> Xlineshape;
+            bool lineshapeInitialized = false;
+
 
             if ( func["type"] == "BreitWigner") {
                 double mass = func["mass"];
@@ -403,81 +471,8 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 double mb = func["mb"];
                 double ma = func["ma"];
                 double d = func["d"];
-                std::string spin = chain["propagators"][0]["spin"];
-                complex weight = evtparseComplex(
-                    chain["weight"]);
-
-                int id1 = topology[0][0];
-                int id2 = topology[0][1];
-                int id3 = topology[1];
-                id1 = id1 - 1;
-                id2 = id2 - 1;
-                id3 = id3 - 1;
-
-                double m1 = p->getDaug(id1)->mass();
-                double m2 = p->getDaug(id2)->mass();
-                double m3 = p->getDaug(id3)->mass();
-
-                //auto tbs = ThreeBodySystem( masses_tbs, spins_tbs );
-
-                // Get spin-parity and parities from JSON
-                std::string spin_str = chain["propagators"][0]["spin"];
-                if(deubevt) std::cout << spin_str << std::endl;
-                std::string parity_str = chain["vertices"][1]["parity_factor"];
-                int vertixy_ind = 0;
-                std::string jp = spin_str + parity_str;
-                if(deubevt) std::cout << jp << std::endl;
-
-
-        
-
-
-                std::vector<std::array<double, 3>> helicities;
+                auto Xcheck = func["X"];
                 
-                
-                for ( const auto& vertice : chain["vertices"] )
-                {
-                    double helfactor1 = parseHelicity( vertice["helicities"][0]);
-                    double helfactor2 = parseHelicity( vertice["helicities"][1]);
-                    double heltype;
-                    if ( vertice["type"] == "parity" ) {
-                        std::string formfactor = vertice["formfactor"];
-                        heltype = 1;
-                    }
-                    if ( vertice["type"] == "helicity" ) {
-                        std::string formfactor = vertice["formfactor"];
-                        heltype = 0;
-                    }
-                    helicities.push_back({ helfactor1, helfactor2, heltype });
-                }
-                
-                int helfactor1 = parseHelicity( chain["vertices"][0]["helicities"][0])*2;
-                int helfactor2 = parseHelicity( chain["vertices"][0]["helicities"][1])*2;
-                std::array<int, 2> hel = { helfactor1, helfactor2 };
-                if(deubevt) {
-                    std::cout << "Helicities: " << helfactor1 << " " << helfactor2 << std::endl;
-                }
-
-                int parfactor1 = parseHelicity( chain["vertices"][1]["helicities"][0])*2;
-                int parfactor2 = parseHelicity( chain["vertices"][1]["helicities"][1])*2;
-                std::array<int, 2> par = { parfactor1, parfactor2 };
-                std::string par_type = chain["vertices"][1]["parity_factor"];
-                bool par_sign = false;
-                if(par_type == "+") {
-                    par_sign = true;
-                } else if(par_type == "-") {
-                    par_sign = false;
-                } else {
-                    EvtGenReport( EVTGEN_ERROR, "EvtGen" )
-                        << "Unbekannter Paritätsfaktor: " << par_type << std::endl;
-                }
-
-                if(deubevt) {
-                    std::cout << "Parity factors: " << parfactor1 << " " << parfactor2 << std::endl;
-                    std::cout << "Parity sign: " << par_sign << std::endl;
-                }
-            
-
 
                 ///////  Blatt Weisskopf Faktoren  ///////
                 // Berechne Zerfallsimpulse für Blatt-Weisskopf-Formfaktoren
@@ -493,6 +488,7 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 
 
                 auto Xlineshapeold = BreitWigner(mass, width);
+
                 // Log the calculated q and q0 for deubevtging
 
                 // Überprüfe auf vorhandene Formfaktoren in den Vertices
@@ -511,7 +507,7 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                                 double ssub = σs[id3];
                                 double msub = sqrt(ssub);
 
-                                double q = breakup(mLc, msub, m3);
+                                double q = breakup(mParent, msub, m3);
     
                                 
                                 formFactor1 *= BlattWeisskopf(q, L, radius);
@@ -556,14 +552,19 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
 
                 // Modifiziere das Breit-Wigner mit dem Formfaktor
                 auto originalBreitWigner = make_multichannel_bw_single(mass, width, ma, mb, l, d);
-                auto Xlineshape = [originalBreitWigner, formFactor1,formFactor2](double s) -> complex {
+                Xlineshape = [originalBreitWigner, formFactor1,formFactor2](double s) -> complex {
                     return originalBreitWigner(s) * formFactor1 * formFactor2;
                 };
+                lineshapeInitialized = true;
+
+
+
+                /// Debug ///////////
                 if(compjulia) std::cout << resonanceName << "XLineshape: " << Xlineshape(σs[kint-1]) << " with s=" << σs[kint-1]<< std::endl;
                 if(compjulia) std::cout << resonanceName << "Xlineshapeold: " << Xlineshapeold(σs[kint-1]) << " " << mass << " " << width << std::endl;
                 if(compjulia) std::cout << resonanceName << "FF " << formFactor1 << " " << formFactor2 << std::endl;
                 // Get k from topology
-                   
+                    
 
                         if(deubevt) EvtGenReport( EVTGEN_INFO, "EvtGen" ) << "INFO" << std::endl;
                 
@@ -571,111 +572,42 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 if(deubevt) std::cout << "k: " << kint << std::endl;
                 if(deubevt) std::cout << mass << " " << width << std::endl;
                 if(deubevt) std::cout << "masses: " << ms[0] << " " << ms[1] << " "
-                          << ms[2] << " " << ms[3] << std::endl;
+                            << ms[2] << " " << ms[3] << std::endl;
                 if(deubevt) std::cout << "spins: " << spins[0] << " " << spins[1] << " "
-                          << spins[2] << spins[3] << std::endl;
-                
-                ThreeBodyParities Ps = {'+', '-', '-', '+'};
+                            << spins[2] << spins[3] << std::endl;
 
-                // Create DecayChain
-                auto dc = createDecayChainCoupling( kint, Xlineshape, jp, tbs, RecouplingType::NoRecoupling, hel, false, RecouplingType::ParityRecoupling, par, par_sign );
-                if(compjulia) std::cout << resonanceName << " k " << kint << " Lineshape " << Xlineshape(0.0) << jp << " helicity " << hel[0] << hel[1] << " parity " << par[0] << par[1] << par_sign << std::endl;
-                model.add(dc, resonanceName, weight);
+                /*
+                // Validations point check
+                // check if LineshapeName is in "misc": {"amplitude_model_checksums": [
+                for ( const auto& check : decayDescription["misc"]["amplitude_model_checksums"] ) {
+                    if ( check["name"] == LineshapeName ) {
+                        auto valpoint_str = check["point"];
+                        auto valvalue_str = check["value"];
+                        complex valvalue = evtparseComplex(valvalue_str);
 
-                if(deubevt or compjulia) std::cout << weight << std::endl;
-                std::vector<double> two_λs = { 0.5, 0.5, 0.5 };
+                        // search for valpoint_str in  "parameter_points": [
 
-                int weightint = 1;
+                        for ( const auto& point : decayDescription["parameter_points"] ) {
+                            if ( point["name"] == valpoint_str ) {
+                                double valpoint = point["value"];
 
-                Tensor4Dcomp A_chain_values = tbDecays.amplitude4dcomp( *dc, σs , 1);
-                if(compjulia or deubevt){ std::cout << "Single amp tensor:" << std::endl;
-                for ( int i = 0; i < A_chain_values.size(); ++i ) {
-                    for ( int j = 0; j < A_chain_values[0].size(); ++j ) {
-                        for ( int k = 0; k < A_chain_values[0][0].size(); ++k ) {
-                            for ( int z = 0; z < A_chain_values[0][0][0].size(); ++z ) {
-                                std::cout << A_chain_values[i][j][k][z] << "\t";    // Tab für schöne Ausrichtung
+                                complex calculatedValue = Xlineshape(valpoint);
+                                std::cout << "Validation point: " << valpoint_str << " = " << valpoint
+                                          << ", calculated value: " << calculatedValue
+                                          << ", expected value: " << valvalue << std::endl;
                             }
+                            break;
                         }
+                        break;
                     }
-                    std::cout << "\n";
-                }
-           }
+                }*/
 
-                //weight = complex(1.,1.);
-                //std::cout << resonanceName << weight << std::endl;
-
-                double realintensity = 0;
-                for ( int i = 0; i < A_chain_values.size(); ++i ) {
-                    for ( int j = 0; j < A_chain_values[0].size(); ++j ) {
-                        for ( int k = 0; k < A_chain_values[0][0].size(); ++k ) {
-                            for ( int z = 0; z < A_chain_values[0][0][0].size(); ++z ) {
-                                //realintensity += A_chain_values[i][j][k][z].real() * A_chain_values[i][j][k][z].real() * weight.real() * weight.real() +
-                                //                + A_chain_values[i][j][k][z].imag() * A_chain_values[i][j][k][z].imag() * weight.imag() * weight.imag();
-                                double amp_intensity = A_chain_values[i][j][k][z].real() * A_chain_values[i][j][k][z].real() * weight.real() * weight.real() +
-                                                A_chain_values[i][j][k][z].imag() * A_chain_values[i][j][k][z].imag() * weight.imag() * weight.imag();
-                                realintensity += amp_intensity; // Add intensity for this amplitude
-                                //std::cout << resonanceName << " Amplitude[" << i << "][" << j << "][" << k << "][" << z << "] = " 
-                                //          << A_chain_values[i][j][k][z] << weight << amp_intensity << std::endl;
-                                if(deubevt) std::cout << "Amplitude[" << i << "][" << j << "][" << k << "][" << z << "] = " << realintensity << std::endl;
-                            }
-                        }
-                    }
-                }
-
-
-                bool frwithweight = true;
-                if (!frwithweight) {
-                    realintensity = tbDecays.intensity( *dc, σs, weightint ); // Calculate intensity without weight
-                }
-                
-                intensity += realintensity; // Add real intensity to total intensity
-                //std::cout << resonanceName << "Intensity: " << tbDecays.intensity( *dc, σs, kint) << std::endl;
-                //std::cout << resonanceName << "Weight Intensity: " << tbDecays.intensity( *dc, σs, kint , weight) << std::endl;
-
-                
-
-                // Find existing entry for this resonance or add a new one
-                bool found = false;
-                for (size_t i = 0; i < weighttuple.size(); i++) {
-                    if (resonanceName == weighttuple[i].first) {
-                        // Update existing entry
-                    
-                        //weighttuple[i].second += tbDecays.intensity(*dc, σs, kint, weight);
-                        weighttuple[i].second += realintensity; // Add real intensity to existing entry
-                    
-                        //weighttuple[i].second += tbDecays.intensity(*dc, σs, 1);
-
-                        found = true;
-                        //std::cout << "Updated entry for " << resonanceName << std::endl;
-                        break; // Found the matching entry, no need to continue the loop
-                    }
-                }
-
-                
-
-                // If no entry exists for this resonance, add a new one
-                if (!found) {
-                    //weighttuple.push_back(std::make_pair(resonanceName, tbDecays.intensity(*dc, σs, kint)));
-                    weighttuple.push_back(std::make_pair(resonanceName, realintensity));
-
-                    //std::cout << "Added new entry for " << resonanceName << std::endl;
-                }
-
-                
-                
-                //weighttuple.push_back(std::make_pair(resonanceName, tbDecays.intensity(*dc, σs, kint)));//amplitude = amplitude(dc, sigma)
-                //amplitude = amplitude(dc, sigma, two_λs);
-
-                //std::array = {
-                //    std::pow( ( daughtermass[0] + daughtermass[1] ), 2 ),
-                //    std::pow( ( daughtermass[1] + daughtermass[2] ), 2 ),
-                //    std::pow( ( daughtermass[2] + daughtermass[0] ), 2 ) };
-                //A_chain_values[i] = aligned_amplitude(chain, invariants, masses); // matrices in helicities [+1/2,-1/2] x [+1/2,-1/2]
+               
             }
 
 
 
-            if( func["type"] == "Flatte" ) {
+            if( func["type"] == "MultichannelBreitWigner" ) {
 
 
 
@@ -697,81 +629,7 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 int l2 = func["channels"][1]["l"];
                 double d2 = func["channels"][1]["d"];
 
-                std::string spin = chain["propagators"][0]["spin"];
-                complex weight = evtparseComplex(
-                    chain["weight"]);
-
-                int id1 = topology[0][0];
-                int id2 = topology[0][1];
-                int id3 = topology[1];
-                id1 = id1 - 1;
-                id2 = id2 - 1;
-                id3 = id3 - 1;
-
-                double m1 = p->getDaug(id1)->mass();
-                double m2 = p->getDaug(id2)->mass();
-                double m3 = p->getDaug(id3)->mass();
-
-                //auto tbs = ThreeBodySystem( masses_tbs, spins_tbs );
-
-                // Get spin-parity and parities from JSON
-                std::string spin_str = chain["propagators"][0]["spin"];
-                if(deubevt) std::cout << spin_str << std::endl;
-                std::string parity_str = chain["vertices"][1]["parity_factor"];
-                int vertixy_ind = 0;
-                std::string jp = spin_str + parity_str;
-                if(deubevt) std::cout << jp << std::endl;
-
-
-        
-
-
-                std::vector<std::array<double, 3>> helicities;
-                
-                
-                for ( const auto& vertice : chain["vertices"] )
-                {
-                    double helfactor1 = parseHelicity( vertice["helicities"][0]);
-                    double helfactor2 = parseHelicity( vertice["helicities"][1]);
-                    double heltype;
-                    if ( vertice["type"] == "parity" ) {
-                        std::string formfactor = vertice["formfactor"];
-                        heltype = 1;
-                    }
-                    if ( vertice["type"] == "helicity" ) {
-                        std::string formfactor = vertice["formfactor"];
-                        heltype = 0;
-                    }
-                    helicities.push_back({ helfactor1, helfactor2, heltype });
-                }
-                
-                int helfactor1 = parseHelicity( chain["vertices"][0]["helicities"][0])*2;
-                int helfactor2 = parseHelicity( chain["vertices"][0]["helicities"][1])*2;
-                std::array<int, 2> hel = { helfactor1, helfactor2 };
-                if(deubevt) {
-                    std::cout << "Helicities: " << helfactor1 << " " << helfactor2 << std::endl;
-                }
-
-                int parfactor1 = parseHelicity( chain["vertices"][1]["helicities"][0])*2;
-                int parfactor2 = parseHelicity( chain["vertices"][1]["helicities"][1])*2;
-                std::array<int, 2> par = { parfactor1, parfactor2 };
-                std::string par_type = chain["vertices"][1]["parity_factor"];
-                bool par_sign = false;
-                if(par_type == "+") {
-                    par_sign = true;
-                } else if(par_type == "-") {
-                    par_sign = false;
-                } else {
-                    EvtGenReport( EVTGEN_ERROR, "EvtGen" )
-                        << "Unbekannter Paritätsfaktor: " << par_type << std::endl;
-                }
-
-                if(deubevt) {
-                    std::cout << "Parity factors: " << parfactor1 << " " << parfactor2 << std::endl;
-                    std::cout << "Parity sign: " << par_sign << std::endl;
-                }
-                //Ps = {0,0,0,0};
-
+              
 
                 ///////  Blatt Weisskopf Faktoren  ///////
                 // Berechne Zerfallsimpulse für Blatt-Weisskopf-Formfaktoren
@@ -804,7 +662,7 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                                 double ssub = σs[id3];
                                 double msub = sqrt(ssub);
 
-                                double q = breakup(mLc, msub, m3);
+                                double q = breakup(mParent, msub, m3);
     
                                 
                                 formFactor1 *= BlattWeisskopf(q, L, radius);
@@ -845,8 +703,7 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 }
     
                 
-                int kint = topology[1].get<int>(); 
-
+                
                 // Modifiziere das Breit-Wigner mit dem Formfaktor
                 // make flatte function
                 auto originalLineshape = make_flatte(mass, 
@@ -854,487 +711,135 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                                                        gsq2, ma2, mb2, l2, d2);
                 //auto Xlineshapeold = BreitWigner(m
  
-                auto Xlineshape = [originalLineshape, formFactor1,formFactor2](double s) -> complex {
+                Xlineshape = [originalLineshape, formFactor1,formFactor2](double s) -> complex {
                     return originalLineshape(s) * formFactor1 * formFactor2;
                 };
+                lineshapeInitialized = true;
+
+
+                // Debug ///////////
+
                 if(compjulia) std::cout << resonanceName << "XLineshape: " << Xlineshape(σs[kint-1]) << " with s=" << σs[kint-1]<< std::endl;
                 if(compjulia) std::cout << resonanceName << "FF " << formFactor1 << " " << formFactor2 << std::endl;
                 // Get k from topology
-                //std::cout << l1 << " " << d1 << " " << l2 << " " << d2 << std::endl;
+                    
 
                         if(deubevt) EvtGenReport( EVTGEN_INFO, "EvtGen" ) << "INFO" << std::endl;
                 
                 if(deubevt) std::cout << resonanceName << std::endl;
                 if(deubevt) std::cout << "k: " << kint << std::endl;
-                if(deubevt) std::cout << mass << " "  << std::endl;
+                if(deubevt) std::cout << mass << std::endl;
                 if(deubevt) std::cout << "masses: " << ms[0] << " " << ms[1] << " "
-                          << ms[2] << " " << ms[3] << std::endl;
+                            << ms[2] << " " << ms[3] << std::endl;
                 if(deubevt) std::cout << "spins: " << spins[0] << " " << spins[1] << " "
-                          << spins[2] << spins[3] << std::endl;
-                
-                ThreeBodyParities Ps = {'+', '-', '-', '+'};
+                            << spins[2] << spins[3] << std::endl;
 
-                // Create DecayChain
-                auto dc = createDecayChainCoupling( kint, Xlineshape, jp, tbs, RecouplingType::NoRecoupling, hel, false, RecouplingType::ParityRecoupling, par, par_sign );
-                if(compjulia) std::cout << resonanceName << " k " << kint << " Lineshape " << Xlineshape(0.0) << jp << " helicity " << hel[0] << hel[1] << " parity " << par[0] << par[1] << par_sign << std::endl;
-                model.add(dc, resonanceName, weight);
-
-                if(deubevt or compjulia) std::cout << weight << std::endl;
-                std::vector<double> two_λs = { 0.5, 0.5, 0.5 };
-
-                int weightint = 1;
-
-                Tensor4Dcomp A_chain_values = tbDecays.amplitude4dcomp( *dc, σs , 1);
-                if(compjulia or deubevt){ std::cout << "Single amp tensor:" << std::endl;
-                for ( int i = 0; i < A_chain_values.size(); ++i ) {
-                    for ( int j = 0; j < A_chain_values[0].size(); ++j ) {
-                        for ( int k = 0; k < A_chain_values[0][0].size(); ++k ) {
-                            for ( int z = 0; z < A_chain_values[0][0][0].size(); ++z ) {
-                                std::cout << A_chain_values[i][j][k][z] << "\t";    // Tab für schöne Ausrichtung
-                            }
-                        }
-                    }
-                    std::cout << "\n";
-                }
-           }
-
-                //weight = complex(1.,1.);
-                //std::cout << resonanceName << weight << std::endl;
-
-                double realintensity = 0;
-                for ( int i = 0; i < A_chain_values.size(); ++i ) {
-                    for ( int j = 0; j < A_chain_values[0].size(); ++j ) {
-                        for ( int k = 0; k < A_chain_values[0][0].size(); ++k ) {
-                            for ( int z = 0; z < A_chain_values[0][0][0].size(); ++z ) {
-                                //realintensity += A_chain_values[i][j][k][z].real() * A_chain_values[i][j][k][z].real() * weight.real() * weight.real() +
-                                //                + A_chain_values[i][j][k][z].imag() * A_chain_values[i][j][k][z].imag() * weight.imag() * weight.imag();
-                                double amp_intensity = A_chain_values[i][j][k][z].real() * A_chain_values[i][j][k][z].real() * weight.real() * weight.real() +
-                                                A_chain_values[i][j][k][z].imag() * A_chain_values[i][j][k][z].imag() * weight.imag() * weight.imag();
-                                realintensity += amp_intensity; // Add intensity for this amplitude
-                                //std::cout << resonanceName << " Amplitude[" << i << "][" << j << "][" << k << "][" << z << "] = " 
-                                //          << A_chain_values[i][j][k][z] << weight << amp_intensity << std::endl;
-                                if(deubevt) std::cout << "Amplitude[" << i << "][" << j << "][" << k << "][" << z << "] = " << realintensity << std::endl;
-                            }
-                        }
-                    }
-                }
-
-
-                bool frwithweight = true;
-                if (!frwithweight) {
-                    realintensity = tbDecays.intensity( *dc, σs, weightint ); // Calculate intensity without weight
-                }
-                
-                intensity += realintensity; // Add real intensity to total intensity
-
-
-                
-
-                // Find existing entry for this resonance or add a new one
-                bool found = false;
-                for (size_t i = 0; i < weighttuple.size(); i++) {
-                    if (resonanceName == weighttuple[i].first) {
-                        // Update existing entry
-                    
-                        //weighttuple[i].second += tbDecays.intensity(*dc, σs, kint, weight);
-                        weighttuple[i].second += realintensity; // Add real intensity to existing entry
-                    
-                        //weighttuple[i].second += tbDecays.intensity(*dc, σs, 1);
-
-                        found = true;
-                        //std::cout << "Updated entry for " << resonanceName << std::endl;
-                        break; // Found the matching entry, no need to continue the loop
-                    }
-                }
-
-                
-
-                // If no entry exists for this resonance, add a new one
-                if (!found) {
-                    //weighttuple.push_back(std::make_pair(resonanceName, tbDecays.intensity(*dc, σs, kint)));
-                    weighttuple.push_back(std::make_pair(resonanceName, realintensity));
-
-                    //std::cout << "Added new entry for " << resonanceName << std::endl;
-                }
-
-           
             }
-
 
             if( paramType.find( "_BuggBW" ) != std::string::npos ) {
 
-                std::function<complex(double)> Xlineshape;
                 if(paramType.find( "K700_BuggBW" ) != std::string::npos) {
                     Xlineshape = make_Bugg_BW_K700();
+                    lineshapeInitialized = true;
                 }
 
                 if(paramType.find( "K1430_BuggBW" ) != std::string::npos) {
                     Xlineshape = make_Bugg_BW_K1430();
+                    lineshapeInitialized = true;
                 }
-
-                std::string spin = chain["propagators"][0]["spin"];
-                complex weight = evtparseComplex(
-                    chain["weight"]);
-
-                int id1 = topology[0][0];
-                int id2 = topology[0][1];
-                int id3 = topology[1];
-                id1 = id1 - 1;
-                id2 = id2 - 1;
-                id3 = id3 - 1;
-                int kint = topology[1].get<int>();
-
-                 std::string spin_str = chain["propagators"][0]["spin"];
-                if(deubevt) std::cout << spin_str << std::endl;
-                std::string parity_str = chain["vertices"][1]["parity_factor"];
-                int vertixy_ind = 0;
-                std::string jp = spin_str + parity_str;
-                if(deubevt) std::cout << jp << std::endl;
-
-
-        
-
-
-                std::vector<std::array<double, 3>> helicities;
-                
-                
-                for ( const auto& vertice : chain["vertices"] )
-                {
-                    double helfactor1 = parseHelicity( vertice["helicities"][0]);
-                    double helfactor2 = parseHelicity( vertice["helicities"][1]);
-                    double heltype;
-                    if ( vertice["type"] == "parity" ) {
-                        std::string formfactor = vertice["formfactor"];
-                        heltype = 1;
-                    }
-                    if ( vertice["type"] == "helicity" ) {
-                        std::string formfactor = vertice["formfactor"];
-                        heltype = 0;
-                    }
-                    helicities.push_back({ helfactor1, helfactor2, heltype });
-                }
-                
-                int helfactor1 = parseHelicity( chain["vertices"][0]["helicities"][0])*2;
-                int helfactor2 = parseHelicity( chain["vertices"][0]["helicities"][1])*2;
-                std::array<int, 2> hel = { helfactor1, helfactor2 };
-                if(deubevt) {
-                    std::cout << "Helicities: " << helfactor1 << " " << helfactor2 << std::endl;
-                }
-
-                int parfactor1 = parseHelicity( chain["vertices"][1]["helicities"][0])*2;
-                int parfactor2 = parseHelicity( chain["vertices"][1]["helicities"][1])*2;
-                std::array<int, 2> par = { parfactor1, parfactor2 };
-                std::string par_type = chain["vertices"][1]["parity_factor"];
-                bool par_sign = false;
-                if(par_type == "+") {
-                    par_sign = true;
-                } else if(par_type == "-") {
-                    par_sign = false;
-                } else {
-                    EvtGenReport( EVTGEN_ERROR, "EvtGen" )
-                        << "Unbekannter Paritätsfaktor: " << par_type << std::endl;
-                }
-
-
-               
-                if(compjulia) std::cout << resonanceName << "XLineshape: " << Xlineshape(σs[kint-1]) << " with s=" << σs[kint-1]<< std::endl;
-                // Get k from topology
-                //std::cout << l1 << " " << d1 << " " << l2 << " " << d2 << std::endl;
-
-                        if(deubevt) EvtGenReport( EVTGEN_INFO, "EvtGen" ) << "INFO" << std::endl;
-                
-                if(deubevt) std::cout << resonanceName << std::endl;
-                if(deubevt) std::cout << "k: " << kint << std::endl;
-                if(deubevt) std::cout << "masses: " << ms[0] << " " << ms[1] << " "
-                          << ms[2] << " " << ms[3] << std::endl;
-                if(deubevt) std::cout << "spins: " << spins[0] << " " << spins[1] << " "
-                          << spins[2] << spins[3] << std::endl;
-                
-                ThreeBodyParities Ps = {'+', '-', '-', '+'};
-
-                // Create DecayChain
-                auto dc = createDecayChainCoupling( kint, Xlineshape, jp, tbs, RecouplingType::NoRecoupling, hel, false, RecouplingType::ParityRecoupling, par, par_sign );
-                if(compjulia) std::cout << resonanceName << " k " << kint << " Lineshape " << Xlineshape(0.0) << jp << " helicity " << hel[0] << hel[1] << " parity " << par[0] << par[1] << par_sign << std::endl;
-                model.add(dc, resonanceName, weight);
-
-                if(deubevt or compjulia) std::cout << weight << std::endl;
-                std::vector<double> two_λs = { 0.5, 0.5, 0.5 };
-
-                int weightint = 1;
-
-                Tensor4Dcomp A_chain_values = tbDecays.amplitude4dcomp( *dc, σs , 1);
-                if(compjulia or deubevt){ std::cout << "Single amp tensor:" << std::endl;
-                for ( int i = 0; i < A_chain_values.size(); ++i ) {
-                    for ( int j = 0; j < A_chain_values[0].size(); ++j ) {
-                        for ( int k = 0; k < A_chain_values[0][0].size(); ++k ) {
-                            for ( int z = 0; z < A_chain_values[0][0][0].size(); ++z ) {
-                                std::cout << A_chain_values[i][j][k][z] << "\t";    // Tab für schöne Ausrichtung
-                            }
-                        }
-                    }
-                    std::cout << "\n";
-                }
-           }
-
-                //weight = complex(1.,1.);
-                //std::cout << resonanceName << weight << std::endl;
-
-                double realintensity = 0;
-                for ( int i = 0; i < A_chain_values.size(); ++i ) {
-                    for ( int j = 0; j < A_chain_values[0].size(); ++j ) {
-                        for ( int k = 0; k < A_chain_values[0][0].size(); ++k ) {
-                            for ( int z = 0; z < A_chain_values[0][0][0].size(); ++z ) {
-                                //realintensity += A_chain_values[i][j][k][z].real() * A_chain_values[i][j][k][z].real() * weight.real() * weight.real() +
-                                //                + A_chain_values[i][j][k][z].imag() * A_chain_values[i][j][k][z].imag() * weight.imag() * weight.imag();
-                                double amp_intensity = A_chain_values[i][j][k][z].real() * A_chain_values[i][j][k][z].real() * weight.real() * weight.real() +
-                                                A_chain_values[i][j][k][z].imag() * A_chain_values[i][j][k][z].imag() * weight.imag() * weight.imag();
-                                realintensity += amp_intensity; // Add intensity for this amplitude
-                                //std::cout << resonanceName << " Amplitude[" << i << "][" << j << "][" << k << "][" << z << "] = " 
-                                //          << A_chain_values[i][j][k][z] << weight << amp_intensity << std::endl;
-                                if(deubevt) std::cout << "Amplitude[" << i << "][" << j << "][" << k << "][" << z << "] = " << realintensity << std::endl;
-                            }
-                        }
-                    }
-                }
-
-
-                bool frwithweight = true;
-                if (!frwithweight) {
-                    realintensity = tbDecays.intensity( *dc, σs, weightint ); // Calculate intensity without weight
-                }
-                
-                intensity += realintensity; // Add real intensity to total intensity
-
-
-                
-
-                // Find existing entry for this resonance or add a new one
-                bool found = false;
-                for (size_t i = 0; i < weighttuple.size(); i++) {
-                    if (resonanceName == weighttuple[i].first) {
-                        // Update existing entry
-                    
-                        //weighttuple[i].second += tbDecays.intensity(*dc, σs, kint, weight);
-                        weighttuple[i].second += realintensity; // Add real intensity to existing entry
-                    
-                        //weighttuple[i].second += tbDecays.intensity(*dc, σs, 1);
-
-                        found = true;
-                        //std::cout << "Updated entry for " << resonanceName << std::endl;
-                        break; // Found the matching entry, no need to continue the loop
-                    }
-                }
-
-                
-
-                // If no entry exists for this resonance, add a new one
-                if (!found) {
-                    //weighttuple.push_back(std::make_pair(resonanceName, tbDecays.intensity(*dc, σs, kint)));
-                    weighttuple.push_back(std::make_pair(resonanceName, realintensity));
-
-                    //std::cout << "Added new entry for " << resonanceName << std::endl;
-                }
-
-
-
-
-
             }
 
-            /*
-            if( func["type"] == "generic_function" ) {
-
-                std::function<complex(double)> Xlineshape;
-                
-
-                std::string spin = chain["propagators"][0]["spin"];
-                complex weight = evtparseComplex(
-                    chain["weight"]);
-
-                int id1 = topology[0][0];
-                int id2 = topology[0][1];
-                int id3 = topology[1];
-                id1 = id1 - 1;
-                id2 = id2 - 1;
-                id3 = id3 - 1;
-                int kint = topology[1].get<int>();
-
-                 std::string spin_str = chain["propagators"][0]["spin"];
-                if(deubevt) std::cout << spin_str << std::endl;
-                std::string parity_str = chain["vertices"][1]["parity_factor"];
-                int vertixy_ind = 0;
-                std::string jp = spin_str + parity_str;
-                if(deubevt) std::cout << jp << std::endl;
 
 
-        
 
+            std::cout << "Test print: " << testprint << std::endl;
+            testprint++;
+            
+            
+            ThreeBodyParities Ps = {'+', '-', '-', '+'};
 
-                std::vector<std::array<double, 3>> helicities;
-                
-                
-                for ( const auto& vertice : chain["vertices"] )
-                {
-                    double helfactor1 = parseHelicity( vertice["helicities"][0]);
-                    double helfactor2 = parseHelicity( vertice["helicities"][1]);
-                    double heltype;
-                    if ( vertice["type"] == "parity" ) {
-                        std::string formfactor = vertice["formfactor"];
-                        heltype = 1;
-                    }
-                    if ( vertice["type"] == "helicity" ) {
-                        std::string formfactor = vertice["formfactor"];
-                        heltype = 0;
-                    }
-                    helicities.push_back({ helfactor1, helfactor2, heltype });
-                }
-                
-                int helfactor1 = parseHelicity( chain["vertices"][0]["helicities"][0])*2;
-                int helfactor2 = parseHelicity( chain["vertices"][0]["helicities"][1])*2;
-                std::array<int, 2> hel = { helfactor1, helfactor2 };
-                if(deubevt) {
-                    std::cout << "Helicities: " << helfactor1 << " " << helfactor2 << std::endl;
-                }
+            if (!lineshapeInitialized) {
+                std::cout << "Warnung: Unbekannter Lineshape-Typ für Resonanz " << resonanceName 
+                        << ": " << paramType << std::endl;
+                // Fallback-Initialisierung
+                Xlineshape = [](double s) -> complex { return complex(1.0, 0.0); };
+            }
 
-                int parfactor1 = parseHelicity( chain["vertices"][1]["helicities"][0])*2;
-                int parfactor2 = parseHelicity( chain["vertices"][1]["helicities"][1])*2;
-                std::array<int, 2> par = { parfactor1, parfactor2 };
-                std::string par_type = chain["vertices"][1]["parity_factor"];
-                bool par_sign = false;
-                if(par_type == "+") {
-                    par_sign = true;
-                } else if(par_type == "-") {
-                    par_sign = false;
-                } else {
-                    EvtGenReport( EVTGEN_ERROR, "EvtGen" )
-                        << "Unbekannter Paritätsfaktor: " << par_type << std::endl;
-                }
+            auto dc = createDecayChainCoupling( kint, Xlineshape, jp, tbs, RecouplingType::NoRecoupling, hel, false, RecouplingType::ParityRecoupling, par, par_sign );
+            if(compjulia) std::cout << resonanceName << " k " << kint << " Lineshape " << Xlineshape(σs[kint-1]) << jp << " helicity " << hel[0] << hel[1] << " parity " << par[0] << par[1] << par_sign << std::endl;
+            model.add(dc, resonanceName, weight);
 
+            if(deubevt or compjulia) std::cout << weight << std::endl;
+            std::vector<double> two_λs = { 0.5, 0.5, 0.5 };
 
-               
-                if(compjulia) std::cout << resonanceName << "XLineshape: " << Xlineshape(σs[kint-1]) << " with s=" << σs[kint-1]<< std::endl;
-                // Get k from topology
-                //std::cout << l1 << " " << d1 << " " << l2 << " " << d2 << std::endl;
+            int weightint = 1;
 
-                        if(deubevt) EvtGenReport( EVTGEN_INFO, "EvtGen" ) << "INFO" << std::endl;
-                
-                if(deubevt) std::cout << resonanceName << std::endl;
-                if(deubevt) std::cout << "k: " << kint << std::endl;
-                if(deubevt) std::cout << "masses: " << ms[0] << " " << ms[1] << " "
-                          << ms[2] << " " << ms[3] << std::endl;
-                if(deubevt) std::cout << "spins: " << spins[0] << " " << spins[1] << " "
-                          << spins[2] << spins[3] << std::endl;
-                
-                ThreeBodyParities Ps = {'+', '-', '-', '+'};
-
-                // Create DecayChain
-                auto dc = createDecayChainCoupling( kint, Xlineshape, jp, tbs, RecouplingType::NoRecoupling, hel, false, RecouplingType::ParityRecoupling, par, par_sign );
-                if(compjulia) std::cout << resonanceName << " k " << kint << " Lineshape " << Xlineshape(0.0) << jp << " helicity " << hel[0] << hel[1] << " parity " << par[0] << par[1] << par_sign << std::endl;
-                model.add(dc, resonanceName, weight);
-
-                if(deubevt or compjulia) std::cout << weight << std::endl;
-                std::vector<double> two_λs = { 0.5, 0.5, 0.5 };
-
-                int weightint = 1;
-
-                Tensor4Dcomp A_chain_values = tbDecays.amplitude4dcomp( *dc, σs , 1);
-                if(compjulia or deubevt){ std::cout << "Single amp tensor:" << std::endl;
-                for ( int i = 0; i < A_chain_values.size(); ++i ) {
-                    for ( int j = 0; j < A_chain_values[0].size(); ++j ) {
-                        for ( int k = 0; k < A_chain_values[0][0].size(); ++k ) {
-                            for ( int z = 0; z < A_chain_values[0][0][0].size(); ++z ) {
-                                std::cout << A_chain_values[i][j][k][z] << "\t";    // Tab für schöne Ausrichtung
-                            }
-                        }
-                    }
-                    std::cout << "\n";
-                }
-           }
-
-                //weight = complex(1.,1.);
-                //std::cout << resonanceName << weight << std::endl;
-
-                double realintensity = 0;
-                for ( int i = 0; i < A_chain_values.size(); ++i ) {
-                    for ( int j = 0; j < A_chain_values[0].size(); ++j ) {
-                        for ( int k = 0; k < A_chain_values[0][0].size(); ++k ) {
-                            for ( int z = 0; z < A_chain_values[0][0][0].size(); ++z ) {
-                                //realintensity += A_chain_values[i][j][k][z].real() * A_chain_values[i][j][k][z].real() * weight.real() * weight.real() +
-                                //                + A_chain_values[i][j][k][z].imag() * A_chain_values[i][j][k][z].imag() * weight.imag() * weight.imag();
-                                double amp_intensity = A_chain_values[i][j][k][z].real() * A_chain_values[i][j][k][z].real() * weight.real() * weight.real() +
-                                                A_chain_values[i][j][k][z].imag() * A_chain_values[i][j][k][z].imag() * weight.imag() * weight.imag();
-                                realintensity += amp_intensity; // Add intensity for this amplitude
-                                //std::cout << resonanceName << " Amplitude[" << i << "][" << j << "][" << k << "][" << z << "] = " 
-                                //          << A_chain_values[i][j][k][z] << weight << amp_intensity << std::endl;
-                                if(deubevt) std::cout << "Amplitude[" << i << "][" << j << "][" << k << "][" << z << "] = " << realintensity << std::endl;
-                            }
+            Tensor4Dcomp A_chain_values = tbDecays.amplitude4dcomp( *dc, σs , 1);
+            if(compjulia or deubevt){ std::cout << "Single amp tensor:" << std::endl;
+            for ( int i = 0; i < A_chain_values.size(); ++i ) {
+                for ( int j = 0; j < A_chain_values[0].size(); ++j ) {
+                    for ( int k = 0; k < A_chain_values[0][0].size(); ++k ) {
+                        for ( int z = 0; z < A_chain_values[0][0][0].size(); ++z ) {
+                            std::cout << A_chain_values[i][j][k][z] << "\t";    // Tab für schöne Ausrichtung
                         }
                     }
                 }
-
-
-                bool frwithweight = true;
-                if (!frwithweight) {
-                    realintensity = tbDecays.intensity( *dc, σs, weightint ); // Calculate intensity without weight
-                }
-                
-                intensity += realintensity; // Add real intensity to total intensity
-
-
-                
-
-                // Find existing entry for this resonance or add a new one
-                bool found = false;
-                for (size_t i = 0; i < weighttuple.size(); i++) {
-                    if (resonanceName == weighttuple[i].first) {
-                        // Update existing entry
-                    
-                        //weighttuple[i].second += tbDecays.intensity(*dc, σs, kint, weight);
-                        weighttuple[i].second += realintensity; // Add real intensity to existing entry
-                    
-                        //weighttuple[i].second += tbDecays.intensity(*dc, σs, 1);
-
-                        found = true;
-                        //std::cout << "Updated entry for " << resonanceName << std::endl;
-                        break; // Found the matching entry, no need to continue the loop
-                    }
-                }
-
-                
-
-                // If no entry exists for this resonance, add a new one
-                if (!found) {
-                    //weighttuple.push_back(std::make_pair(resonanceName, tbDecays.intensity(*dc, σs, kint)));
-                    weighttuple.push_back(std::make_pair(resonanceName, realintensity));
-
-                    //std::cout << "Added new entry for " << resonanceName << std::endl;
-                }
+                std::cout << "\n";
+            }
+            }
 
 
 
-
-
-            }*/
-
-        }
     }
-    num++;
     
+    num++;
+
+   
+    std::cout << "Test print: " << testprint << std::endl;
+    testprint++;
 
     double maxProbEstimate = estimateMaxProb(formfactors);
     //std::cout << "Empfohlene maxProb für Kette " << ": " << maxProbEstimate << std::endl;
 
 
-   
+    
 
 
     Tensor4Dcomp amp = model.amplitude4d(σs, 1);
+/*    size_t dim1 = amp.size();
+    size_t dim2 = dim1 > 0 ? amp[0].size() : 0;
+    size_t dim3 = dim2 > 0 ? amp[0][0].size() : 0;
+    size_t dim4 = dim3 > 0 ? amp[0][0][0].size() : 0;
+
+    
+
+    // Für 2x1x1x2 Matrix wie im Beispiel
+    if (dim1 == 2 && dim2 == 1 && dim3 == 1 && dim4 == 2) {
+        vertex(0, 0, EvtComplex(amp[0][0][0][0].real(), amp[0][0][0][0].imag()));
+        vertex(0, 1, EvtComplex(amp[0][0][0][1].real(), amp[0][0][0][1].imag()));
+        vertex(1, 0, EvtComplex(amp[1][0][0][0].real(), amp[1][0][0][0].imag()));
+        vertex(1, 1, EvtComplex(amp[1][0][0][1].real(), amp[1][0][0][1].imag()));
+    }
+    */
     std::vector<std::vector<EvtComplex>> amplitude = {
         {EvtComplex(amp[0][0][0][0].real(), amp[0][0][0][0].imag()),
          EvtComplex(amp[0][0][0][1].real(), amp[0][0][0][1].imag())},
         {EvtComplex(amp[1][0][0][0].real(), amp[1][0][0][0].imag()),
          EvtComplex(amp[1][0][0][1].real(), amp[1][0][0][1].imag())}
     };
+
+    vertex( 0, 0, amplitude[0][0] );
+    vertex( 0, 1, amplitude[0][1] );
+    vertex( 1, 0, amplitude[1][0] );
+    vertex( 1, 1, amplitude[1][1] );
+
+    std::cout << "Amplitude tensor size: " << amp.size() << "x" 
+              << amp[0].size() << "x" << amp[0][0].size() << "x" 
+              << amp[0][0][0].size() << std::endl;
+
+
+
+
 
     bool ampout = false;
     if(deubevt or ampout or compjulia) {
@@ -1352,93 +857,93 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     }
     }}
     
-    vertex( 0, 0, amplitude[0][0] );
-    vertex( 0, 1, amplitude[0][1] );
-    vertex( 1, 0, amplitude[1][0] );
-    vertex( 1, 1, amplitude[1][1] );
+    
 
 
-    if(deubevt) EvtGenReport( EVTGEN_EMERGENCY, "EvtGen" ) << "break" << std::endl;
-    double modelintensity = model.intensity(σs, 1);
-    double modintens = 0;
+
+    /// Calculate the intensities for this decay ///
+    const auto& resonance_names = model.names();
+    
+    const double modelintensity = model.intensity(σs, 1);
     const auto compintens = model.component_intensities(σs, 1);
-    
-    modintens += compintens[19] + compintens[18] + compintens[17] + compintens[16] ;
+    totalintensity += modelintensity; // Add model intensity to total intensity
+    allmodelintensities.push_back(modelintensity); // Store model intensity for later analysis
+    // check that modelintensity is a number
+    if (std::isnan(modelintensity)) {
+        EvtGenReport( EVTGEN_ERROR, "EvtGen" )
+            << "Model intensity is NaN!" << std::endl;
+        return; // Skip this decay if model intensity is NaN
+    }
 
-    //newtotalintensity += modintens;
-    newtotalintensity += modelintensity; // Add the component intensities to the new total intensity
-    allmodelintensities.push_back(modelintensity); // Store the model intensity in the vector
-    
+    int ind = 0;
+    for (const auto& name : resonance_names) {
+         // Find existing entry for this resonance or add a new one
+        bool found = false;
+        for (size_t i = 0; i < weighttuple.size(); i++) {
+            if (name == weighttuple[i].first) {
+                // Update existing entry
+            
+                //weighttuple[i].second += tbDecays.intensity(*dc, σs, kint, weight);
+                weighttuple[i].second.push_back( compintens[ind]); // Add real intensity to existing entry
+            
+                //weighttuple[i].second += tbDecays.intensity(*dc, σs, 1);
+
+                found = true;
+            }
+        }
+
+        
+
+        // If no entry exists for this resonance, add a new one
+        if (!found) {
+            //weighttuple.push_back(std::make_pair(resonanceName, tbDecays.intensity(*dc, σs, kint)));
+            weighttuple.push_back(std::make_pair(name, std::vector<double>{compintens[ind]}));
+
+            //std::cout << "Added new entry for " << resonanceName << std::endl;
+        }
+        ind++;
+    }
 
 
     if(num%1000 == 0) {
-    if(fractionout) 
-    {std::cout << "Component intensities: N = " << allmodelintensities.size() << std::endl;
-    for (size_t i = 0; i < intensities.size(); i++) {
-        // Calculate running mean
-        double running_mean = intensities[i] / newtotalintensity;
+    if(fractionout) {
+        std::cout << "Component intensities: N = " << allmodelintensities.size() << std::endl;
         
-        // Get individual fraction values from intensityfractions vector
-        if (i < allcompintensities.size() && !allcompintensities[i].empty()) {
-            // Calculate mean of stored fractions
-            double mean = (std::accumulate(allcompintensities[i].begin(), allcompintensities[i].end(), 0.0) / allcompintensities[i].size());
-            double modelmean = (std::accumulate(allmodelintensities.begin(), allmodelintensities.end(), 0.0) / allmodelintensities.size());
-
-           //mean /= modelmean; // Normalize mean by model mean
-            // Calculate variance
-            double variance = 0.0;
-            for (const auto& value : allcompintensities[i]) { 
-                variance += (value - mean) * (value - mean);
-            }
-            variance /= allcompintensities[i].size();
-            double stddev = std::sqrt(variance / allcompintensities[i].size());
-            
-            std::cout << weighttuple[i].first << " Mean: " << (mean/modelmean)*100 << " ± " << (stddev/modelmean)*100
-                      << ", N=" << allcompintensities[i].size() << "" << std::endl;
-        } else {
-            std::cout << weighttuple[i].first << " Intensity " << i << ": " 
-                      << running_mean << " (No variance data)" << std::endl;
-        }
-    }}
-    }
-
-
-    if(compjulia){
-        std::cout << "Total intensity " << modelintensity << std::endl;
-
-        for (size_t i = 0; i < intensities.size(); i++) {
-        // Calculate running mean
-        double running_mean = intensities[i] / newtotalintensity;
+        // Mittelwert der Modellintensitäten berechnen
+        double model_mean = std::accumulate(allmodelintensities.begin(), allmodelintensities.end(), 0.0) 
+                           / allmodelintensities.size();
         
-        // Get individual fraction values from intensityfractions vector
-        if (i < intensityfractions.size() && !intensityfractions[i].empty()) {
-            // Calculate mean of stored fractions
-            double mean = std::reduce(intensityfractions[i].begin(), intensityfractions[i].end(), 0.0) / intensityfractions[i].size();
+        // Über weighttuple iterieren
+        for (const auto& entry : weighttuple) {
+            const std::string& name = entry.first;
+            const std::vector<double>& intensities = entry.second;
             
-            // Calculate variance
-            double variance = 0.0;
-            for (const auto& value : intensityfractions[i]) {
-                variance += (value - mean) * (value - mean);
+            if (!intensities.empty()) {
+                // Mittelwert der Intensitäten berechnen
+                double mean = std::accumulate(intensities.begin(), intensities.end(), 0.0) 
+                            / allmodelintensities.size();
+                
+                // Varianz berechnen
+                double variance = 0.0;
+                for (const auto& value : intensities) {
+                    variance += (value - mean) * (value - mean);
+                }
+                variance /= intensities.size();
+                
+                // Standardfehler berechnen
+                double stddev = std::sqrt(variance / allmodelintensities.size());
+                
+                // Ausgabe wie im ursprünglichen Code, aber mit Prozentangabe
+                std::cout << name << " Mean: " << (mean/model_mean)*100 << " ± " 
+                          << (stddev/model_mean)*100 << ", N=" << allmodelintensities.size() << std::endl;
+            } else {
+                // Fallback für leere Intensitätsvektoren
+                std::cout << name << " Intensity: 0.0 (No variance data)" << std::endl;
             }
-            variance /= intensityfractions[i].size();
-            double stddev = std::sqrt(variance);
-            
-            std::cout << weighttuple[i].first << " Intensity " << i << ": " 
-                      << running_mean << " (Mean: " << mean << " ± " << stddev 
-                      << ", N=" << intensityfractions[i].size() << ")" << std::endl;
-        } else {
-            std::cout << weighttuple[i].first << " Intensity " << i << ": " 
-                      << running_mean << " (No variance data)" << std::endl;
         }
     }
     }
-
-
-
-
-
     
-
 
 }
 

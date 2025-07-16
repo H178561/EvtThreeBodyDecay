@@ -304,10 +304,7 @@ void EvtThreeBodyDecays::init()
 
 }
 
-int num = 0;
-std::vector<double> allmodelintensities;
-double totalintensity = 0;
-std::vector<std::pair<std::string, std::vector<double>>> weighttuple; 
+
 
 
 
@@ -477,18 +474,24 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 double ma = func["ma"];
                 double d = func["d"];
                 
-
+                
                 auto FormFactors = calculateFormFactors(chain, functions, σs, id1,id2,id3, mParent, m1, m2, m3);
                 double formFactor1 = FormFactors[0];
                 double formFactor2 = FormFactors[1];
+                
+
+                auto formFactorFunc = createFormFactorFunction(chain, functions, id1, id2, id3, mParent, m1, m2, m3);
+
                 
                 int kint = topology[1].get<int>(); 
 
                 // Modifiziere das Breit-Wigner mit dem Formfaktor
                 auto originalBreitWigner = make_multichannel_bw_single(mass, width, ma, mb, l, d);
-                Xlineshape = [originalBreitWigner, formFactor1,formFactor2](double s) -> complex {
-                    return originalBreitWigner(s) * formFactor1 * formFactor2;
+                Xlineshape = [originalBreitWigner, formFactorFunc](double s) -> complex {
+                    auto ff = formFactorFunc(s);
+                    return originalBreitWigner(s) * ff[0] * ff[1];
                 };
+
                 lineshapeInitialized = true;
 
 
@@ -573,6 +576,8 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 auto FormFactors = calculateFormFactors(chain, functions, σs, id1,id2,id3, mParent, m1, m2, m3);
                 double formFactor1 = FormFactors[0];
                 double formFactor2 = FormFactors[1];
+
+                auto formFactorFunc = createFormFactorFunction(chain, functions, id1, id2, id3, mParent, m1, m2, m3);
     
                 
                 
@@ -583,8 +588,9 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                                                        gsq2, ma2, mb2, l2, d2);
                 //auto Xlineshapeold = BreitWigner(m
  
-                Xlineshape = [originalLineshape, formFactor1,formFactor2](double s) -> complex {
-                    return originalLineshape(s) * formFactor1 * formFactor2;
+                Xlineshape = [originalLineshape, formFactorFunc](double s) -> complex {
+                    auto ff = formFactorFunc(s);
+                    return originalLineshape(s) * ff[0] * ff[1];
                 };
                 lineshapeInitialized = true;
 
@@ -673,8 +679,8 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
 
             int weightint = 1;
             
-            Tensor4Dcomp A_chain_values = tbDecays.amplitude4dcomp( *dc, σs , 1);
             if(compjulia or deubevt){ std::cout << "Single amp tensor:" << std::endl;
+            Tensor4Dcomp A_chain_values = tbDecays.amplitude4dcomp( *dc, σs , 1);
             for ( int i = 0; i < A_chain_values.size(); ++i ) {
                 for ( int j = 0; j < A_chain_values[0].size(); ++j ) {
                     for ( int k = 0; k < A_chain_values[0][0].size(); ++k ) {
@@ -740,81 +746,8 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     
     
 
-
+    if(fractionout) calculateIntensities(model, σs);
     
-    /// Calculate the intensities for this decay ///
-    const auto& resonance_names = model.names();
-    
-    const double modelintensity = model.intensity(σs, 1);
-    const auto compintens = model.component_intensities(σs, 1);
-    totalintensity += modelintensity; // Add model intensity to total intensity
-    allmodelintensities.push_back(modelintensity); // Store model intensity for later analysis
-    // check that modelintensity is a number
-    if (std::isnan(modelintensity)) {
-        EvtGenReport( EVTGEN_ERROR, "EvtGen" )
-            << "Model intensity is NaN!" << std::endl;
-        return; // Skip this decay if model intensity is NaN
-    }
-
-
-    int ind = 0;
-    for (const auto& name : resonance_names) {
-        bool found = false;
-        for (size_t i = 0; i < weighttuple.size(); i++) {
-            if (name == weighttuple[i].first) {
-
-                weighttuple[i].second.push_back( compintens[ind]); // Add real intensity to existing entry
-                found = true;
-            }
-        }
-
-    
-        // If no entry exists for this resonance, add a new one
-        if (!found) {
-            weighttuple.push_back(std::make_pair(name, std::vector<double>{compintens[ind]}));
-        }
-        ind++;
-    }
-
-
-    if(num%1000 == 0) {
-    if(fractionout) {
-        std::cout << "Component intensities: N = " << allmodelintensities.size() << std::endl;
-        
-        // Mittelwert der Modellintensitäten berechnen
-        double model_mean = std::accumulate(allmodelintensities.begin(), allmodelintensities.end(), 0.0) 
-                           / allmodelintensities.size();
-        
-        // Über weighttuple iterieren
-        for (const auto& entry : weighttuple) {
-            const std::string& name = entry.first;
-            const std::vector<double>& intensities = entry.second;
-            
-            if (!intensities.empty()) {
-                // Mittelwert der Intensitäten berechnen
-                double mean = std::accumulate(intensities.begin(), intensities.end(), 0.0) 
-                            / allmodelintensities.size();
-                
-                // Varianz berechnen
-                double variance = 0.0;
-                for (const auto& value : intensities) {
-                    variance += (value - mean) * (value - mean);
-                }
-                variance /= intensities.size();
-                
-                // Standardfehler berechnen
-                double stddev = std::sqrt(variance / allmodelintensities.size());
-                
-                // Ausgabe wie im ursprünglichen Code, aber mit Prozentangabe
-                std::cout << name << " Mean: " << (mean/model_mean)*100 << " ± " 
-                          << (stddev/model_mean)*100 << ", N=" << allmodelintensities.size() << std::endl;
-            } else {
-                // Fallback für leere Intensitätsvektoren
-                std::cout << name << " Intensity: 0.0 (No variance data)" << std::endl;
-            }
-        }
-    }
-    }
 
 
 }
@@ -871,4 +804,137 @@ std::array<double, 2> EvtThreeBodyDecays::calculateFormFactors(
         }
     }
     return {formFactor1, formFactor2};
+}
+
+
+// Neue Funktion - erstellt eine s-abhängige Formfaktor-Funktion
+std::function<std::array<double, 2>(double)> EvtThreeBodyDecays::createFormFactorFunction(
+    const nlohmann::json& chain,
+    const std::map<std::string, nlohmann::json>& functions,
+    int id1, int id2, int id3,
+    double mParent, double m1, double m2, double m3)
+{
+    // Sammle alle Formfaktor-Konfigurationen aus dem Chain
+    struct FFConfig {
+        double radius;
+        int L;
+        bool isFirstLevel;
+    };
+    
+    std::vector<FFConfig> ffConfigs;
+    
+    for (const auto& vertex : chain["vertices"]) {
+        if (vertex.contains("formfactor") && !vertex["formfactor"].get<std::string>().empty()) {
+            std::string formfactorName = vertex["formfactor"];
+            if (functions.find(formfactorName) != functions.end()) {
+                const auto& ff = functions.at(formfactorName);
+                
+                FFConfig config;
+                config.radius = ff["radius"];
+                config.L = ff["l"];
+                config.isFirstLevel = vertex["node"].is_array() && vertex["node"][0].is_array();
+                
+                ffConfigs.push_back(config);
+            }
+        }
+    }
+    
+    // Returne Lambda-Funktion die von s abhängt
+    return [ffConfigs, id3, mParent, m1, m2, m3](double s) -> std::array<double, 2> {
+        double formFactor1 = 1.0;
+        double formFactor2 = 1.0;
+        
+        for (const auto& config : ffConfigs) {
+            double msub = std::sqrt(s);  // s ist die Mandelstam-Variable für diesen Kanal
+            
+            if (config.isFirstLevel) {
+                double q = breakup(mParent, msub, m3);
+                formFactor1 *= BlattWeisskopf(q, config.L, config.radius);
+            } else {
+                double q = breakup(msub, m1, m2);
+                formFactor2 *= BlattWeisskopf(q, config.L, config.radius);
+            }
+        }
+        
+        return {formFactor1, formFactor2};
+    };
+}
+
+
+void EvtThreeBodyDecays::calculateIntensities(ThreeBodyAmplitudeModel model, std::array<double, 3> σs)
+{
+
+    /// Calculate the intensities for this decay ///
+    const auto& resonance_names = model.names();
+    
+    const double modelintensity = model.intensity(σs, 1);
+    const auto compintens = model.component_intensities(σs, 1);
+    totalintensity += modelintensity; // Add model intensity to total intensity
+    allmodelintensities.push_back(modelintensity); // Store model intensity for later analysis
+    // check that modelintensity is a number
+    if (std::isnan(modelintensity)) {
+        EvtGenReport( EVTGEN_ERROR, "EvtGen" )
+            << "Model intensity is NaN!" << std::endl;
+        return; // Skip this decay if model intensity is NaN
+    }
+
+
+    int ind = 0;
+    for (const auto& name : resonance_names) {
+        bool found = false;
+        for (size_t i = 0; i < weighttuple.size(); i++) {
+            if (name == weighttuple[i].first) {
+
+                weighttuple[i].second.push_back( compintens[ind]); // Add real intensity to existing entry
+                found = true;
+            }
+        }
+
+    
+        // If no entry exists for this resonance, add a new one
+        if (!found) {
+            weighttuple.push_back(std::make_pair(name, std::vector<double>{compintens[ind]}));
+        }
+        ind++;
+    }
+
+
+    if(num%1000 == 0) {
+    
+        std::cout << "Component intensities: N = " << allmodelintensities.size() << std::endl;
+        
+        // Mittelwert der Modellintensitäten berechnen
+        double model_mean = std::accumulate(allmodelintensities.begin(), allmodelintensities.end(), 0.0) 
+                           / allmodelintensities.size();
+        
+        // Über weighttuple iterieren
+        for (const auto& entry : weighttuple) {
+            const std::string& name = entry.first;
+            const std::vector<double>& intensities = entry.second;
+            
+            if (!intensities.empty()) {
+                // Mittelwert der Intensitäten berechnen
+                double mean = std::accumulate(intensities.begin(), intensities.end(), 0.0) 
+                            / allmodelintensities.size();
+                
+                // Varianz berechnen
+                double variance = 0.0;
+                for (const auto& value : intensities) {
+                    variance += (value - mean) * (value - mean);
+                }
+                variance /= intensities.size();
+                
+                // Standardfehler berechnen
+                double stddev = std::sqrt(variance / allmodelintensities.size());
+                
+                // Ausgabe wie im ursprünglichen Code, aber mit Prozentangabe
+                std::cout << name << " Mean: " << (mean/model_mean)*100 << " ± " 
+                          << (stddev/model_mean)*100 << ", N=" << allmodelintensities.size() << std::endl;
+            } else {
+                // Fallback für leere Intensitätsvektoren
+                std::cout << name << " Intensity: 0.0 (No variance data)" << std::endl;
+            }
+        }
+    
+    }
 }

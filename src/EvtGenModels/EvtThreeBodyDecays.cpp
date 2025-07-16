@@ -33,7 +33,7 @@ using namespace FormFactors;
 
 bool deubevt = false;
 bool mandeldebug = false;
-bool fractionout = true; // Für Debugging-Zwecke, um Brüche auszugeben
+bool fractionout = false; // Für Debugging-Zwecke, um Brüche auszugeben
 bool ffdebug =false; // Für Debugging-Zwecke, um Formfaktoren auszugeben
 bool compjulia = false; // debug - compare with julia results
 
@@ -252,6 +252,11 @@ void EvtThreeBodyDecays::init()
     auto final_state = decayDescription["kinematics"]["final_state"];
     auto initial_state = decayDescription["kinematics"]["initial_state"];
     auto topology = decayDescription["reference_topology"];
+    misc = decayData["misc"];
+
+    std::cout << misc << std::endl;
+    domains = decayData["domains"];
+    parameterpoints = decayData["parameter_points"];
 
     // Lade alle Funktionen aus der JSON-Datei in eine Lookup-Tabelle
     for ( const auto& func : decayData["functions"] ) {
@@ -303,7 +308,6 @@ int num = 0;
 std::vector<double> allmodelintensities;
 double totalintensity = 0;
 std::vector<std::pair<std::string, std::vector<double>>> weighttuple; 
-int testprint = 0;
 
 
 
@@ -314,6 +318,7 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
             << "Null Pointer auf Partikel!" << std::endl;
         return;
     }
+    
 
     // Generate a phase space decay to initialize daughter particles
     p->initializePhaseSpace(getNDaug(), getDaugs());
@@ -362,7 +367,6 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     double s23 = (ppi + pk).mass2();
     double s31 = (pk + pp).mass2();
 
-    std::vector<double> formfactors;
 
     MandelstamTuple σs = {s23, s31, s12};
 
@@ -375,8 +379,7 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     
     //σs = {1,3,2};
     //std::vector<std::pair<std::string, double>> weighttuple; 
-    std::cout << "Test print: " << testprint << std::endl;
-    testprint++;
+
 
     auto chains = decayDescription["chains"];
     ThreeBodyAmplitudeModel model;
@@ -463,90 +466,21 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
             std::function<complex(double)> Xlineshape;
             bool lineshapeInitialized = false;
 
+            
 
             if ( func["type"] == "BreitWigner") {
+
                 double mass = func["mass"];
                 double width = func["width"];
                 double l = func["l"];
                 double mb = func["mb"];
                 double ma = func["ma"];
                 double d = func["d"];
-                auto Xcheck = func["X"];
                 
 
-                ///////  Blatt Weisskopf Faktoren  ///////
-                // Berechne Zerfallsimpulse für Blatt-Weisskopf-Formfaktoren
-                double qold = 0.0, q0old = 0.0;
-                double formFactor1 = 1.0;
-                double formFactor2 = 1.0;
-
-                // Bestimme die aktuelle invariante Masse basierend auf der Topologie
-                int k = topology[1].get<int>();
-                double invariantMassSq = 0.0;
-                
-                
-                
-
-                auto Xlineshapeold = BreitWigner(mass, width);
-
-                // Log the calculated q and q0 for deubevtging
-
-                // Überprüfe auf vorhandene Formfaktoren in den Vertices
-                for (const auto& vertex : chain["vertices"]) {
-                    if (vertex.contains("formfactor") && !vertex["formfactor"].get<std::string>().empty()) {
-                        std::string formfactorName = vertex["formfactor"];
-                        if (functions.find(formfactorName) != functions.end()) {
-                            const auto& ff = functions[formfactorName];
-                            double radius = ff["radius"];
-                            int L = ff["l"];
-                            
-                            
-                            auto node = vertex["node"];
-                            if (node.is_array() && node[0].is_array()) {
-         
-                                double ssub = σs[id3];
-                                double msub = sqrt(ssub);
-
-                                double q = breakup(mParent, msub, m3);
-    
-                                
-                                formFactor1 *= BlattWeisskopf(q, L, radius);
-                                formfactors.push_back(formFactor1);
-
-                                if(ffdebug) {
-                                std::cout << resonanceName << " Formfactor: " << formfactorName << std::endl;
-                                std::cout << "q: " << q << ", q0: " << " l " << L << " r " << radius << std::endl;
-                                std::cout << "Formfactor1: " << formFactor1 << std::endl;
-                                std::cout << " msub: " << msub << " idx " << id1 << " " << id2 << " " << id3 << "m" << m1 << " " << m2 << " " << m3 << std::endl;
-                                }
-                        
-
-                            } else {
-                            
-                                double ssub = σs[id3];
-                                double msub = sqrt(ssub);
-
-                                // Impuls bei gegebener (laufender) Masse
-                                double q = breakup(msub, m1, m2);
-
-                                formFactor2 *= BlattWeisskopf(q, L, radius);
-                                formfactors.push_back(formFactor2);
-
-                                if(ffdebug) {
-                                std::cout << resonanceName << " Formfactor: " << formfactorName << std::endl;
-                                std::cout << "q: " << q << ", q0: "  << " l " << L << " r " << radius << std::endl;
-                                std::cout << "Formfactor2: " << formFactor2 << std::endl;
-                                std::cout << " msub: " << msub << " idx " << id1 << " " << id2 << " " << id3 << "m" << m1 << " " << m2 << " " << m3 << std::endl;
-
-                                }
-                            }
-
-                            
-                           
-                          }
-                    }
-                }
-    
+                auto FormFactors = calculateFormFactors(chain, functions, σs, id1,id2,id3, mParent, m1, m2, m3);
+                double formFactor1 = FormFactors[0];
+                double formFactor2 = FormFactors[1];
                 
                 int kint = topology[1].get<int>(); 
 
@@ -558,10 +492,8 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 lineshapeInitialized = true;
 
 
-
                 /// Debug ///////////
                 if(compjulia) std::cout << resonanceName << "XLineshape: " << Xlineshape(σs[kint-1]) << " with s=" << σs[kint-1]<< std::endl;
-                if(compjulia) std::cout << resonanceName << "Xlineshapeold: " << Xlineshapeold(σs[kint-1]) << " " << mass << " " << width << std::endl;
                 if(compjulia) std::cout << resonanceName << "FF " << formFactor1 << " " << formFactor2 << std::endl;
                 // Get k from topology
                     
@@ -576,41 +508,47 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 if(deubevt) std::cout << "spins: " << spins[0] << " " << spins[1] << " "
                             << spins[2] << spins[3] << std::endl;
 
-                /*
+
                 // Validations point check
+                auto Xcheck = func["x"];
+
                 // check if LineshapeName is in "misc": {"amplitude_model_checksums": [
-                for ( const auto& check : decayDescription["misc"]["amplitude_model_checksums"] ) {
-                    if ( check["name"] == LineshapeName ) {
+                for ( const auto& check : misc["amplitude_model_checksums"] ) {
+                    // Check if the name matches the LineshapeName
+                    if ( check["distribution"] == LineshapeName ) {
                         auto valpoint_str = check["point"];
                         auto valvalue_str = check["value"];
                         complex valvalue = evtparseComplex(valvalue_str);
-
+                      
                         // search for valpoint_str in  "parameter_points": [
 
-                        for ( const auto& point : decayDescription["parameter_points"] ) {
+                        for ( const auto& point : parameterpoints ) {
                             if ( point["name"] == valpoint_str ) {
-                                double valpoint = point["value"];
+                                auto valpoint = point["parameters"][0]["value"];
+                                complex calculatedValue = originalBreitWigner(valpoint);
 
-                                complex calculatedValue = Xlineshape(valpoint);
-                                std::cout << "Validation point: " << valpoint_str << " = " << valpoint
-                                          << ", calculated value: " << calculatedValue
-                                          << ", expected value: " << valvalue << std::endl;
+                                // check if values match in 1e-6 precision
+                                // Use std::abs to compare complex numbers
+                                bool realmatches = std::abs(valvalue.real() - calculatedValue.real()) < 1e-6;
+                                bool imagmatches = std::abs(valvalue.imag() - calculatedValue.imag()) < 1e-6;
+                                if(!(realmatches && imagmatches)) {
+                                    EvtGenReport( EVTGEN_ERROR, "EvtGen" ) << "Validation point does not match: "
+                                              << valpoint_str << " calculated: "
+                                              << calculatedValue << " expected: "
+                                              << std::endl;
+                                    
+                                }
+                                break;
                             }
-                            break;
+                            
                         }
                         break;
                     }
-                }*/
+                }
 
                
             }
-
-
-
-            if( func["type"] == "MultichannelBreitWigner" ) {
-
-
-
+            else if( func["type"] == "MultichannelBreitWigner" ) {
                 double mass = func["mass"];
                 auto channels = func["channels"];
          
@@ -632,75 +570,9 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
               
 
                 ///////  Blatt Weisskopf Faktoren  ///////
-                // Berechne Zerfallsimpulse für Blatt-Weisskopf-Formfaktoren
-                double qold = 0.0, q0old = 0.0;
-                double formFactor1 = 1.0;
-                double formFactor2 = 1.0;
-
-                // Bestimme die aktuelle invariante Masse basierend auf der Topologie
-                int k = topology[1].get<int>();
-                double invariantMassSq = 0.0;
-                
-                
-                
-
-                // Log the calculated q and q0 for deubevtging
-
-                // Überprüfe auf vorhandene Formfaktoren in den Vertices
-                for (const auto& vertex : chain["vertices"]) {
-                    if (vertex.contains("formfactor") && !vertex["formfactor"].get<std::string>().empty()) {
-                        std::string formfactorName = vertex["formfactor"];
-                        if (functions.find(formfactorName) != functions.end()) {
-                            const auto& ff = functions[formfactorName];
-                            double radius = ff["radius"];
-                            int L = ff["l"];
-                            
-                            
-                            auto node = vertex["node"];
-                            if (node.is_array() && node[0].is_array()) {
-         
-                                double ssub = σs[id3];
-                                double msub = sqrt(ssub);
-
-                                double q = breakup(mParent, msub, m3);
-    
-                                
-                                formFactor1 *= BlattWeisskopf(q, L, radius);
-                                formfactors.push_back(formFactor1);
-
-                                if(ffdebug) {
-                                std::cout << resonanceName << " Formfactor: " << formfactorName << std::endl;
-                                std::cout << "q: " << q << ", q0: " << " l " << L << " r " << radius << std::endl;
-                                std::cout << "Formfactor1: " << formFactor1 << std::endl;
-                                std::cout << " msub: " << msub << " idx " << id1 << " " << id2 << " " << id3 << "m" << m1 << " " << m2 << " " << m3 << std::endl;
-                                }
-                        
-
-                            } else {
-                            
-                                double ssub = σs[id3];
-                                double msub = sqrt(ssub);
-
-                                // Impuls bei gegebener (laufender) Masse
-                                double q = breakup(msub, m1, m2);
-
-                                formFactor2 *= BlattWeisskopf(q, L, radius);
-                                formfactors.push_back(formFactor2);
-
-                                if(ffdebug) {
-                                std::cout << resonanceName << " Formfactor: " << formfactorName << std::endl;
-                                std::cout << "q: " << q << ", q0: "  << " l " << L << " r " << radius << std::endl;
-                                std::cout << "Formfactor2: " << formFactor2 << std::endl;
-                                std::cout << " msub: " << msub << " idx " << id1 << " " << id2 << " " << id3 << "m" << m1 << " " << m2 << " " << m3 << std::endl;
-
-                                }
-                            }
-
-                            
-                           
-                          }
-                    }
-                }
+                auto FormFactors = calculateFormFactors(chain, functions, σs, id1,id2,id3, mParent, m1, m2, m3);
+                double formFactor1 = FormFactors[0];
+                double formFactor2 = FormFactors[1];
     
                 
                 
@@ -724,19 +596,48 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 // Get k from topology
                     
 
-                        if(deubevt) EvtGenReport( EVTGEN_INFO, "EvtGen" ) << "INFO" << std::endl;
-                
-                if(deubevt) std::cout << resonanceName << std::endl;
-                if(deubevt) std::cout << "k: " << kint << std::endl;
-                if(deubevt) std::cout << mass << std::endl;
-                if(deubevt) std::cout << "masses: " << ms[0] << " " << ms[1] << " "
-                            << ms[2] << " " << ms[3] << std::endl;
-                if(deubevt) std::cout << "spins: " << spins[0] << " " << spins[1] << " "
-                            << spins[2] << spins[3] << std::endl;
+
+
+                auto Xcheck = func["x"];
+
+                bool docheckforFlatte = false;
+                if(docheckforFlatte){
+                // check if LineshapeName is in "misc": {"amplitude_model_checksums": [
+                for ( const auto& check : misc["amplitude_model_checksums"] ) {
+                    // Check if the name matches the LineshapeName
+                    if ( check["distribution"] == LineshapeName ) {
+                        auto valpoint_str = check["point"];
+                        auto valvalue_str = check["value"];
+                        complex valvalue = evtparseComplex(valvalue_str);
+                      
+                        // search for valpoint_str in  "parameter_points": [
+
+                        for ( const auto& point : parameterpoints ) {
+                            if ( point["name"] == valpoint_str ) {
+                                auto valpoint = point["parameters"][0]["value"];
+                                complex calculatedValue = originalLineshape(valpoint);
+
+                                // check if values match in 1e-6 precision
+                                // Use std::abs to compare complex numbers
+                                bool realmatches = std::abs(valvalue.real() - calculatedValue.real()) < 1e-6;
+                                bool imagmatches = std::abs(valvalue.imag() - calculatedValue.imag()) < 1e-6;
+                                if(!(realmatches && imagmatches)) {
+                                    EvtGenReport( EVTGEN_ERROR, "EvtGen" ) << "Validation point does not match for: " << LineshapeName << " "
+                                              << valpoint_str << " calculated: "
+                                              << calculatedValue << " expected: " << valvalue
+                                              << std::endl;
+                                    
+                                }
+                                break;
+                            }
+                            
+                        }
+                        break;
+                    }
+                }}
 
             }
-
-            if( paramType.find( "_BuggBW" ) != std::string::npos ) {
+            else if( paramType.find( "_BuggBW" ) != std::string::npos ) {
 
                 if(paramType.find( "K700_BuggBW" ) != std::string::npos) {
                     Xlineshape = make_Bugg_BW_K700();
@@ -752,8 +653,6 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
 
 
 
-            std::cout << "Test print: " << testprint << std::endl;
-            testprint++;
             
             
             ThreeBodyParities Ps = {'+', '-', '-', '+'};
@@ -773,7 +672,7 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
             std::vector<double> two_λs = { 0.5, 0.5, 0.5 };
 
             int weightint = 1;
-
+            
             Tensor4Dcomp A_chain_values = tbDecays.amplitude4dcomp( *dc, σs , 1);
             if(compjulia or deubevt){ std::cout << "Single amp tensor:" << std::endl;
             for ( int i = 0; i < A_chain_values.size(); ++i ) {
@@ -795,10 +694,6 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     num++;
 
    
-    std::cout << "Test print: " << testprint << std::endl;
-    testprint++;
-
-    double maxProbEstimate = estimateMaxProb(formfactors);
     //std::cout << "Empfohlene maxProb für Kette " << ": " << maxProbEstimate << std::endl;
 
 
@@ -806,36 +701,22 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
 
 
     Tensor4Dcomp amp = model.amplitude4d(σs, 1);
-/*    size_t dim1 = amp.size();
+    size_t dim1 = amp.size();
     size_t dim2 = dim1 > 0 ? amp[0].size() : 0;
     size_t dim3 = dim2 > 0 ? amp[0][0].size() : 0;
     size_t dim4 = dim3 > 0 ? amp[0][0][0].size() : 0;
 
     
 
-    // Für 2x1x1x2 Matrix wie im Beispiel
+    
     if (dim1 == 2 && dim2 == 1 && dim3 == 1 && dim4 == 2) {
         vertex(0, 0, EvtComplex(amp[0][0][0][0].real(), amp[0][0][0][0].imag()));
         vertex(0, 1, EvtComplex(amp[0][0][0][1].real(), amp[0][0][0][1].imag()));
         vertex(1, 0, EvtComplex(amp[1][0][0][0].real(), amp[1][0][0][0].imag()));
         vertex(1, 1, EvtComplex(amp[1][0][0][1].real(), amp[1][0][0][1].imag()));
     }
-    */
-    std::vector<std::vector<EvtComplex>> amplitude = {
-        {EvtComplex(amp[0][0][0][0].real(), amp[0][0][0][0].imag()),
-         EvtComplex(amp[0][0][0][1].real(), amp[0][0][0][1].imag())},
-        {EvtComplex(amp[1][0][0][0].real(), amp[1][0][0][0].imag()),
-         EvtComplex(amp[1][0][0][1].real(), amp[1][0][0][1].imag())}
-    };
 
-    vertex( 0, 0, amplitude[0][0] );
-    vertex( 0, 1, amplitude[0][1] );
-    vertex( 1, 0, amplitude[1][0] );
-    vertex( 1, 1, amplitude[1][1] );
 
-    std::cout << "Amplitude tensor size: " << amp.size() << "x" 
-              << amp[0].size() << "x" << amp[0][0].size() << "x" 
-              << amp[0][0][0].size() << std::endl;
 
 
 
@@ -860,7 +741,7 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     
 
 
-
+    
     /// Calculate the intensities for this decay ///
     const auto& resonance_names = model.names();
     
@@ -875,31 +756,22 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
         return; // Skip this decay if model intensity is NaN
     }
 
+
     int ind = 0;
     for (const auto& name : resonance_names) {
-         // Find existing entry for this resonance or add a new one
         bool found = false;
         for (size_t i = 0; i < weighttuple.size(); i++) {
             if (name == weighttuple[i].first) {
-                // Update existing entry
-            
-                //weighttuple[i].second += tbDecays.intensity(*dc, σs, kint, weight);
-                weighttuple[i].second.push_back( compintens[ind]); // Add real intensity to existing entry
-            
-                //weighttuple[i].second += tbDecays.intensity(*dc, σs, 1);
 
+                weighttuple[i].second.push_back( compintens[ind]); // Add real intensity to existing entry
                 found = true;
             }
         }
 
-        
-
+    
         // If no entry exists for this resonance, add a new one
         if (!found) {
-            //weighttuple.push_back(std::make_pair(resonanceName, tbDecays.intensity(*dc, σs, kint)));
             weighttuple.push_back(std::make_pair(name, std::vector<double>{compintens[ind]}));
-
-            //std::cout << "Added new entry for " << resonanceName << std::endl;
         }
         ind++;
     }
@@ -943,9 +815,60 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
         }
     }
     }
-    
+
 
 }
 
 
 
+std::array<double, 2> EvtThreeBodyDecays::calculateFormFactors(
+    nlohmann::json chain,
+    std::map<std::string, nlohmann::json>& functions,
+    std::array<double, 3> σs,
+    int id1, int id2, int id3,
+    double mParent, double m1, double m2, double m3)
+{
+    ///////  Blatt Weisskopf Faktoren  ///////
+    // Berechne Zerfallsimpulse für Blatt-Weisskopf-Formfaktoren
+    double formFactor1 = 1.0;
+    double formFactor2 = 1.0;
+    
+    
+    
+    // Log the calculated q and q0 for deubevtging
+
+    // Überprüfe auf vorhandene Formfaktoren in den Vertices
+    for (const auto& vertex : chain["vertices"]) {
+        if (vertex.contains("formfactor") && !vertex["formfactor"].get<std::string>().empty()) {
+            std::string formfactorName = vertex["formfactor"];
+            if (functions.find(formfactorName) != functions.end()) {
+                const auto& ff = functions[formfactorName];
+                double radius = ff["radius"];
+                int L = ff["l"];
+                
+                
+                auto node = vertex["node"];
+                if (node.is_array() && node[0].is_array()) {
+
+                    double ssub = σs[id3];
+                    double msub = sqrt(ssub);
+
+                    double q = breakup(mParent, msub, m3);
+
+                    
+                    formFactor1 *= BlattWeisskopf(q, L, radius);
+                } else {
+                
+                    double ssub = σs[id3];
+                    double msub = sqrt(ssub);
+
+                    double q = breakup(msub, m1, m2);
+
+                    formFactor2 *= BlattWeisskopf(q, L, radius);
+
+                }
+            }
+        }
+    }
+    return {formFactor1, formFactor2};
+}

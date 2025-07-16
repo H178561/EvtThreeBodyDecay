@@ -36,6 +36,15 @@ class EvtThreeBodyDecays : public EvtDecayAmp {
   private:
     nlohmann::json decayDescription;
     std::map<std::string, nlohmann::json> functions;
+    nlohmann::json domains;
+    nlohmann::json misc;
+    nlohmann::json parameterpoints;
+
+    std::array<double, 2> calculateFormFactors(nlohmann::json chain, std::map<std::string, nlohmann::json>& functions,
+    std::array<double, 3> σs,
+    int id1, int id2, int id3,
+    double mParent, double m1, double m2, double m3);
+
 };
 
 

@@ -40,22 +40,21 @@ class EvtThreeBodyDecays : public EvtDecayAmp {
     nlohmann::json misc;
     nlohmann::json parameterpoints;
 
+    std::unique_ptr<ThreeBodyAmplitudeModel> decayModel;
+
     int num = 0;
     std::vector<double> allmodelintensities;
     double totalintensity = 0;
     std::vector<std::pair<std::string, std::vector<double>>> weighttuple; 
-
-    std::array<double, 2> calculateFormFactors(nlohmann::json chain, std::map<std::string, nlohmann::json>& functions,
-    std::array<double, 3> σs,
-    int id1, int id2, int id3,
-    double mParent, double m1, double m2, double m3);
     
 
     std::function<std::array<double, 2>(double)> createFormFactorFunction(
     const nlohmann::json& chain,
     const std::map<std::string, nlohmann::json>& functions,
-    int id1, int id2, int id3,
     double mParent, double m1, double m2, double m3);
+
+    void createDecayModel(  );
+
 
 
     void calculateIntensities(ThreeBodyAmplitudeModel model, std::array<double, 3> σs);

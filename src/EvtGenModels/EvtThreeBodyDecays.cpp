@@ -298,32 +298,19 @@ void EvtThreeBodyDecays::init()
 
     if(deubevt) EvtGenReport( EVTGEN_INFO, "EvtGen" ) << "INFO" << std::endl;
 
-
-
+    
+    createDecayModel( );
 
 
 }
 
 
 
-
-
-void EvtThreeBodyDecays::decay( EvtParticle* p )
-{
-    if ( !p ) {
-        EvtGenReport( EVTGEN_INFO, "EvtGen" )
-            << "Null Pointer auf Partikel!" << std::endl;
-        return;
-    }
+void EvtThreeBodyDecays::createDecayModel( ){
     
 
-    // Generate a phase space decay to initialize daughter particles
-    p->initializePhaseSpace(getNDaug(), getDaugs());
-    
-    // Get the daughter particles
-    EvtParticle* proton = p->getDaug(0);
-    EvtParticle* pion = p->getDaug(1);
-    EvtParticle* kaon = p->getDaug(2);
+     // Get the daughter particles
+
     
     // Create random Mandelstam variables for the decay
     ThreeBodyDecays tbDecays;
@@ -339,45 +326,17 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     double mDaug3 = final_state[2]["mass"];
 
     ThreeBodyMasses ms = {mDaug1, mDaug2, mDaug3, mParent};
-
     
-    //ThreeBodySpins spins = {1, 0, 0, 1};    // h0=1 bezieht sich auf den Spin des Elternteilchens
-    int spindaug1 = EvtSpinType::getSpin2(p->getDaug(0)->getSpinType());
-    int spindaug2 = EvtSpinType::getSpin2(p->getDaug(1)->getSpinType());
-    int spindaug3 = EvtSpinType::getSpin2(p->getDaug(2)->getSpinType());
-    int spin = EvtSpinType::getSpin2(p->getSpinType());
+    // get spin from json spin entry
+    int spin = parseFractionlocal( initial_state["spin"] ) * 2; // Convert to doubled spin value
+    int spindaug1 = parseFractionlocal( final_state[0]["spin"] ) * 2; // Convert to doubled spin value
+    int spindaug2 = parseFractionlocal( final_state[1]["spin"] ) * 2; // Convert to doubled spin value
+    int spindaug3 = parseFractionlocal( final_state[2]["spin"] ) * 2; // Convert to doubled spin value
 
 
     ThreeBodySpins spins = {spindaug1, spindaug2, spindaug3, spin};    // h0=1 bezieht sich auf den Spin des Elternteilchens
     ThreeBodySystem tbs  = {ms, spins};
-    MandelstamTuple σstest = tbDecays.x2σs({0.3, 0.3}, ms, 1);
-
-    // Get 4-momenta of all particles
-    EvtVector4R pLc = p->getP4();
-    EvtVector4R pp = p->getDaug(0)->getP4();
-    EvtVector4R ppi = p->getDaug(1)->getP4();
-    EvtVector4R pk = p->getDaug(2)->getP4();
     
-   
-
-    double s12 = (pp + ppi).mass2();
-    double s23 = (ppi + pk).mass2();
-    double s31 = (pk + pp).mass2();
-
-
-    MandelstamTuple σs = {s23, s31, s12};
-
-    if(compjulia ) {
-        σs = {1.5,3.2,1.6714505793792584};
-
-    }
-    if(mandeldebug) std::cout << "Mandelstam variables: s12 = " << s12 << ", s23 = " << s23 << ", s31 = " << s31 << std::endl;
-    if(mandeldebug) std::cout << "Invariant masses: mLc = " << mParent << ", mp = " << mDaug1 << ", mpi = " << mDaug2 << ", mk = " << mDaug3 << std::endl;
-    
-    //σs = {1,3,2};
-    //std::vector<std::pair<std::string, double>> weighttuple; 
-
-
     auto chains = decayDescription["chains"];
     ThreeBodyAmplitudeModel model;
 
@@ -399,9 +358,9 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
             id2 = id2 - 1;
             id3 = id3 - 1;
 
-            double m1 = p->getDaug(id1)->mass();
-            double m2 = p->getDaug(id2)->mass();
-            double m3 = p->getDaug(id3)->mass();
+            double m1 = final_state[id1]["mass"];
+            double m2 = final_state[id2]["mass"];
+            double m3 = final_state[id3]["mass"];
 
 
             // Get spin-parity and parities from JSON
@@ -474,13 +433,8 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
                 double ma = func["ma"];
                 double d = func["d"];
                 
-                
-                auto FormFactors = calculateFormFactors(chain, functions, σs, id1,id2,id3, mParent, m1, m2, m3);
-                double formFactor1 = FormFactors[0];
-                double formFactor2 = FormFactors[1];
-                
 
-                auto formFactorFunc = createFormFactorFunction(chain, functions, id1, id2, id3, mParent, m1, m2, m3);
+                auto formFactorFunc = createFormFactorFunction(chain, functions, mParent, m1, m2, m3);
 
                 
                 int kint = topology[1].get<int>(); 
@@ -496,8 +450,8 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
 
 
                 /// Debug ///////////
-                if(compjulia) std::cout << resonanceName << "XLineshape: " << Xlineshape(σs[kint-1]) << " with s=" << σs[kint-1]<< std::endl;
-                if(compjulia) std::cout << resonanceName << "FF " << formFactor1 << " " << formFactor2 << std::endl;
+                //if(compjulia) std::cout << resonanceName << "XLineshape: " << Xlineshape(σs[kint-1]) << " with s=" << σs[kint-1]<< std::endl;
+                //if(compjulia) std::cout << resonanceName << "FF " << formFactor1 << " " << formFactor2 << std::endl;
                 // Get k from topology
                     
 
@@ -572,14 +526,11 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
 
               
 
-                ///////  Blatt Weisskopf Faktoren  ///////
-                auto FormFactors = calculateFormFactors(chain, functions, σs, id1,id2,id3, mParent, m1, m2, m3);
-                double formFactor1 = FormFactors[0];
-                double formFactor2 = FormFactors[1];
 
-                auto formFactorFunc = createFormFactorFunction(chain, functions, id1, id2, id3, mParent, m1, m2, m3);
+                auto formFactorFunc = createFormFactorFunction(chain, functions, mParent, m1, m2, m3);
     
                 
+
                 
                 // Modifiziere das Breit-Wigner mit dem Formfaktor
                 // make flatte function
@@ -597,8 +548,8 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
 
                 // Debug ///////////
 
-                if(compjulia) std::cout << resonanceName << "XLineshape: " << Xlineshape(σs[kint-1]) << " with s=" << σs[kint-1]<< std::endl;
-                if(compjulia) std::cout << resonanceName << "FF " << formFactor1 << " " << formFactor2 << std::endl;
+                //if(compjulia) std::cout << resonanceName << "XLineshape: " << Xlineshape(σs[kint-1]) << " with s=" << σs[kint-1]<< std::endl;
+                //if(compjulia) std::cout << resonanceName << "FF " << formFactor1 << " " << formFactor2 << std::endl;
                 // Get k from topology
                     
 
@@ -671,31 +622,54 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
             }
 
             auto dc = createDecayChainCoupling( kint, Xlineshape, jp, tbs, RecouplingType::NoRecoupling, hel, false, RecouplingType::ParityRecoupling, par, par_sign );
-            if(compjulia) std::cout << resonanceName << " k " << kint << " Lineshape " << Xlineshape(σs[kint-1]) << jp << " helicity " << hel[0] << hel[1] << " parity " << par[0] << par[1] << par_sign << std::endl;
+            //if(compjulia) std::cout << resonanceName << " k " << kint << " Lineshape " << Xlineshape(σs[kint-1]) << jp << " helicity " << hel[0] << hel[1] << " parity " << par[0] << par[1] << par_sign << std::endl;
             model.add(dc, resonanceName, weight);
+        }
 
-            if(deubevt or compjulia) std::cout << weight << std::endl;
-            std::vector<double> two_λs = { 0.5, 0.5, 0.5 };
+    // Set the decay model
+    decayModel = std::make_unique<ThreeBodyAmplitudeModel>(model);
 
-            int weightint = 1;
-            
-            if(compjulia or deubevt){ std::cout << "Single amp tensor:" << std::endl;
-            Tensor4Dcomp A_chain_values = tbDecays.amplitude4dcomp( *dc, σs , 1);
-            for ( int i = 0; i < A_chain_values.size(); ++i ) {
-                for ( int j = 0; j < A_chain_values[0].size(); ++j ) {
-                    for ( int k = 0; k < A_chain_values[0][0].size(); ++k ) {
-                        for ( int z = 0; z < A_chain_values[0][0][0].size(); ++z ) {
-                            std::cout << A_chain_values[i][j][k][z] << "\t";    // Tab für schöne Ausrichtung
-                        }
-                    }
-                }
-                std::cout << "\n";
-            }
-            }
+}
+    
 
 
+
+
+
+
+void EvtThreeBodyDecays::decay( EvtParticle* p )
+{
+    if ( !p ) {
+        EvtGenReport( EVTGEN_INFO, "EvtGen" )
+            << "Null Pointer auf Partikel!" << std::endl;
+        return;
+    }
+    
+
+    // Generate a phase space decay to initialize daughter particles
+    p->initializePhaseSpace(getNDaug(), getDaugs());
+    
+
+    // Get 4-momenta of all particles
+    EvtVector4R pLc = p->getP4();
+    EvtVector4R pp = p->getDaug(0)->getP4();
+    EvtVector4R ppi = p->getDaug(1)->getP4();
+    EvtVector4R pk = p->getDaug(2)->getP4();
+    
+   
+
+    double s12 = (pp + ppi).mass2();
+    double s23 = (ppi + pk).mass2();
+    double s31 = (pk + pp).mass2();
+
+
+    MandelstamTuple σs = {s23, s31, s12};
+
+    if(compjulia ) {
+        σs = {1.5,3.2,1.6714505793792584};
 
     }
+
     
     num++;
 
@@ -706,7 +680,7 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     
 
 
-    Tensor4Dcomp amp = model.amplitude4d(σs, 1);
+    Tensor4Dcomp amp = decayModel->amplitude4d(σs, 1);
     size_t dim1 = amp.size();
     size_t dim2 = dim1 > 0 ? amp[0].size() : 0;
     size_t dim3 = dim2 > 0 ? amp[0][0].size() : 0;
@@ -746,7 +720,7 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     
     
 
-    if(fractionout) calculateIntensities(model, σs);
+    if(fractionout) calculateIntensities(*decayModel, σs);
     
 
 
@@ -754,64 +728,14 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
 
 
 
-std::array<double, 2> EvtThreeBodyDecays::calculateFormFactors(
-    nlohmann::json chain,
-    std::map<std::string, nlohmann::json>& functions,
-    std::array<double, 3> σs,
-    int id1, int id2, int id3,
-    double mParent, double m1, double m2, double m3)
-{
-    ///////  Blatt Weisskopf Faktoren  ///////
-    // Berechne Zerfallsimpulse für Blatt-Weisskopf-Formfaktoren
-    double formFactor1 = 1.0;
-    double formFactor2 = 1.0;
-    
-    
-    
-    // Log the calculated q and q0 for deubevtging
 
-    // Überprüfe auf vorhandene Formfaktoren in den Vertices
-    for (const auto& vertex : chain["vertices"]) {
-        if (vertex.contains("formfactor") && !vertex["formfactor"].get<std::string>().empty()) {
-            std::string formfactorName = vertex["formfactor"];
-            if (functions.find(formfactorName) != functions.end()) {
-                const auto& ff = functions[formfactorName];
-                double radius = ff["radius"];
-                int L = ff["l"];
-                
-                
-                auto node = vertex["node"];
-                if (node.is_array() && node[0].is_array()) {
 
-                    double ssub = σs[id3];
-                    double msub = sqrt(ssub);
-
-                    double q = breakup(mParent, msub, m3);
-
-                    
-                    formFactor1 *= BlattWeisskopf(q, L, radius);
-                } else {
-                
-                    double ssub = σs[id3];
-                    double msub = sqrt(ssub);
-
-                    double q = breakup(msub, m1, m2);
-
-                    formFactor2 *= BlattWeisskopf(q, L, radius);
-
-                }
-            }
-        }
-    }
-    return {formFactor1, formFactor2};
-}
 
 
 // Neue Funktion - erstellt eine s-abhängige Formfaktor-Funktion
 std::function<std::array<double, 2>(double)> EvtThreeBodyDecays::createFormFactorFunction(
     const nlohmann::json& chain,
     const std::map<std::string, nlohmann::json>& functions,
-    int id1, int id2, int id3,
     double mParent, double m1, double m2, double m3)
 {
     // Sammle alle Formfaktor-Konfigurationen aus dem Chain
@@ -840,7 +764,7 @@ std::function<std::array<double, 2>(double)> EvtThreeBodyDecays::createFormFacto
     }
     
     // Returne Lambda-Funktion die von s abhängt
-    return [ffConfigs, id3, mParent, m1, m2, m3](double s) -> std::array<double, 2> {
+    return [ffConfigs, mParent, m1, m2, m3](double s) -> std::array<double, 2> {
         double formFactor1 = 1.0;
         double formFactor2 = 1.0;
         

@@ -36,7 +36,7 @@ bool deubevt = false;
 bool mandeldebug = false;
 bool fractionout = false; // Für Debugging-Zwecke, um Brüche auszugeben
 bool ffdebug =false; // Für Debugging-Zwecke, um Formfaktoren auszugeben
-bool compjulia = true; // debug - compare with julia results
+bool compjulia = false; // debug - compare with julia results
 
 
 // Konstruktor
@@ -219,10 +219,10 @@ double estimateMaxProb(const std::vector<double>& formfactors, double baseProb =
 // Initialisiere das Modell
 void EvtThreeBodyDecays::initProbMax()
 {
-    setProbMax( 1500000 );
-    setProbMax( 100000 );
+    //setProbMax( 1500000 );
+    //setProbMax( 100000 ); // for lc2pkpi
     //setProbMax( 10000000 );    // Setze die maximale Wahrscheinlichkeit für den Zerfall
-    //setProbMax(10000);    // Setze die maximale Wahrscheinlichkeit für den Zerfall
+    setProbMax(10000);    // Setze die maximale Wahrscheinlichkeit für den Zerfall
 
     
 }
@@ -231,13 +231,13 @@ void EvtThreeBodyDecays::initProbMax()
 // Initialisiere das Modell
 void EvtThreeBodyDecays::init()
 {
+    std::cout << "Initializing THREEBODYDECAYS model..." << std::endl;
 
     // Check that there are the correct number of daughters
     checkNDaug( 3 );
 
     // We expect specific spin types for the parent and daughters
-    checkSpinParent(
-        EvtSpinType::DIRAC );    // Ändere dies entsprechend dem erwarteten Spin-Typ
+    //checkSpinParent(  EvtSpinType::DIRAC );    // Ändere dies entsprechend dem erwarteten Spin-Typ
 
     EvtSpinType::spintype d0type = EvtPDL::getSpinType( getDaug( 0 ) );
     EvtSpinType::spintype d1type = EvtPDL::getSpinType( getDaug( 1 ) );
@@ -292,32 +292,13 @@ void EvtThreeBodyDecays::init()
     auto final_state = decayDescription["kinematics"]["final_state"];
     auto initial_state = decayDescription["kinematics"]["initial_state"];
     auto topology = decayDescription["reference_topology"];
-    misc = decayData["misc"];
+    nlohmann::json misc = decayData["misc"];
 
     std::cout << misc << std::endl;
     domains = decayData["domains"];
-    parameterpoints = decayData["parameter_points"];
+    
 
-    // Lade alle Funktionen aus der JSON-Datei in eine Lookup-Tabelle
-    for ( const auto& func : decayData["functions"] ) {
-        functions[func["name"]] = func;
-    }
-
-    // Überprüfe, ob die Funktionen geladen wurden
-    if ( functions.empty() ) {
-        EvtGenReport( EVTGEN_INFO, "EvtGen" )
-            << "Keine Funktionsdefinitionen in der JSON-Datei gefunden!"
-            << std::endl;
-        return;
-    }
-
-    // Log the loaded functions for deubevtging
-    EvtGenReport( EVTGEN_INFO, "EvtGen" )
-        << "Loaded functions from JSON file:" << std::endl;
-    for ( const auto& func : functions ) {
-        EvtGenReport( EVTGEN_INFO, "EvtGen" )
-            << "Function name: " << func.first << std::endl;
-    }
+    
     
 
 
@@ -331,31 +312,60 @@ void EvtThreeBodyDecays::init()
     if(deubevt) EvtGenReport( EVTGEN_INFO, "EvtGen" ) << "INFO" << std::endl;
 
     
-    createDecayModel( );
+    auto buildedModel = createDecayModel( decayData );
+
+    std::cout << "Decay model created with " << buildedModel->size() << " chains." << std::endl;
+
+    decayModel = std::move(buildedModel);
 
 
 }
 
 
 
-void EvtThreeBodyDecays::createDecayModel( ){
+std::unique_ptr<ThreeBodyAmplitudeModel> EvtThreeBodyDecays::createDecayModel( json decayData , bool outputInfo){
     
+    nlohmann::json decDescription;
+    if (outputInfo) std::cout << "Creating decay model from JSON data..." << std::endl;
+    
+    // Überprüfe, ob die Zerfallsbeschreibung vorhanden ist
+    for ( const auto& dist : decayData["distributions"] ) {
+        if ( dist["name"] == "default_model" ) {
+            decDescription = dist["decay_description"];
+            break;
+        }
+    }
 
+    nlohmann::json misc = decayData["misc"];
+    parameterpoints = decayData["parameter_points"];
+
+    // Lade alle Funktionen aus der JSON-Datei in eine Lookup-Tabelle
+    for ( const auto& func : decayData["functions"] ) {
+        functions[func["name"]] = func;
+    }
+
+    if (outputInfo) std::cout << "Decay description extracted." << std::endl;
      // Get the daughter particles
 
     
     // Create random Mandelstam variables for the decay
     ThreeBodyDecays tbDecays;
-  
+    bool LineshapesValid = true;
+    std::vector<std::string> invalidLineshapes;
 
-    auto final_state = decayDescription["kinematics"]["final_state"];
-    auto initial_state = decayDescription["kinematics"]["initial_state"];
+
+    auto final_state = decDescription["kinematics"]["final_state"];
+    auto initial_state = decDescription["kinematics"]["initial_state"];
 
 
     double mParent = initial_state["mass"];
     double mDaug1 = final_state[0]["mass"];
     double mDaug2 = final_state[1]["mass"];
     double mDaug3 = final_state[2]["mass"];
+
+
+
+    
 
     ThreeBodyMasses ms = {mDaug1, mDaug2, mDaug3, mParent};
     
@@ -369,7 +379,7 @@ void EvtThreeBodyDecays::createDecayModel( ){
     ThreeBodySpins spins = {spindaug1, spindaug2, spindaug3, spin};    // h0=1 bezieht sich auf den Spin des Elternteilchens
     ThreeBodySystem tbs  = {ms, spins};
     
-    auto chains = decayDescription["chains"];
+    auto chains = decDescription["chains"];
     ThreeBodyAmplitudeModel model;
 
     for ( const auto& chain : chains ) {
@@ -397,11 +407,11 @@ void EvtThreeBodyDecays::createDecayModel( ){
 
             // Get spin-parity and parities from JSON
             std::string spin_str = chain["propagators"][0]["spin"];
-            if(deubevt) std::cout << resonanceName << " Spin " << spin_str << std::endl;
+            if(deubevt or outputInfo) std::cout << resonanceName << " Spin " << spin_str << std::endl;
             std::string parity_str = "+";
             int vertixy_ind = 0;
             std::string jp = spin_str + parity_str;
-            if(deubevt) std::cout << resonanceName << " Parity " << jp << std::endl;
+            if(deubevt or outputInfo) std::cout << resonanceName << " Parity " << jp << std::endl;
             complex weight = evtparseComplex(chain["weight"]);
             // Define RecouplingType enum if not already defined
             
@@ -441,28 +451,28 @@ void EvtThreeBodyDecays::createDecayModel( ){
             }
 
             // Debug-Ausgabe:
-            std::cout << "Helicities: " << std::endl;
+            if (outputInfo) std::cout << "Helicities: " << std::endl;
             for (const auto& hel : helicities) {
-                std::cout << "RecouplingType: ";
+                if (outputInfo) std::cout << "RecouplingType: ";
                 switch (hel.recouplingType) {
                     case RecouplingType::ParityRecoupling:
-                        std::cout << "ParityRecoupling" << std::endl;
+                        if (outputInfo) std::cout << "ParityRecoupling" << std::endl;
                         break;
                     case RecouplingType::NoRecoupling:
-                        std::cout << "NoRecoupling" << std::endl;
+                        if (outputInfo) std::cout << "NoRecoupling" << std::endl;
                         break;
                     case RecouplingType::LSRecoupling:
-                        std::cout << "LSRecoupling" << std::endl;
+                        if (outputInfo) std::cout << "LSRecoupling" << std::endl;
                         break;
                 }
-                std::cout << "Helicity Factors: " << hel.helicityFactors[0] << ", " << hel.helicityFactors[1] << std::endl;
-                std::cout << "Parity Sign: " << (hel.paritySign ? "+" : "-") << std::endl;
+                if (outputInfo) std::cout << "Helicity Factors: " << hel.helicityFactors[0] << ", " << hel.helicityFactors[1] << std::endl;
+                if (outputInfo) std::cout << "Parity Sign: " << (hel.paritySign ? "+" : "-") << std::endl;
             }
 
             std::function<complex(double)> Xlineshape;
             bool lineshapeInitialized = false;
 
-            
+            if (outputInfo) std::cout << "Lineshape: " << LineshapeName << " Type: " << func["type"] << std::endl;
 
             if ( func["type"] == "BreitWigner") {
 
@@ -495,13 +505,13 @@ void EvtThreeBodyDecays::createDecayModel( ){
                     
 
                         if(deubevt) EvtGenReport( EVTGEN_INFO, "EvtGen" ) << "INFO" << std::endl;
-                
-                if(deubevt) std::cout << resonanceName << std::endl;
-                if(deubevt) std::cout << "k: " << kint << std::endl;
-                if(deubevt) std::cout << mass << " " << width << std::endl;
-                if(deubevt) std::cout << "masses: " << ms[0] << " " << ms[1] << " "
+
+                if(deubevt or outputInfo) std::cout << resonanceName << std::endl;
+                if(deubevt or outputInfo) std::cout << "k: " << kint << std::endl;
+                if(deubevt or outputInfo) std::cout << mass << " " << width << std::endl;
+                if(deubevt or outputInfo) std::cout << "masses: " << ms[0] << " " << ms[1] << " "
                             << ms[2] << " " << ms[3] << std::endl;
-                if(deubevt) std::cout << "spins: " << spins[0] << " " << spins[1] << " "
+                if(deubevt or outputInfo) std::cout << "spins: " << spins[0] << " " << spins[1] << " "
                             << spins[2] << " " << spins[3] << std::endl;
 
 
@@ -532,9 +542,13 @@ void EvtThreeBodyDecays::createDecayModel( ){
                                               << valpoint << " calculated: "
                                               << calculatedValue << " expected: " << valvalue.real() << " + i*" << valvalue.imag()
                                               << std::endl;
-                                    std::cout << "FF" << formFactorFunc(valpoint)[0] << " " << formFactorFunc(valpoint)[1] << std::endl;
-
+                                    if (outputInfo) std::cout << "FF" << formFactorFunc(valpoint)[0] << " " << formFactorFunc(valpoint)[1] << std::endl;
+                                    LineshapesValid = false;
+                                    invalidLineshapes.push_back(LineshapeName);
                                     
+                                }
+                                else {
+                                    if (outputInfo) std::cout << "Validation point matches for: " << LineshapeName << std::endl;
                                 }
                                 break;
                             }
@@ -592,8 +606,8 @@ void EvtThreeBodyDecays::createDecayModel( ){
                 //if(compjulia) std::cout << resonanceName << "XLineshape: " << Xlineshape(σs[kint-1]) << " with s=" << σs[kint-1]<< std::endl;
                 //if(compjulia) std::cout << resonanceName << "FF " << formFactor1 << " " << formFactor2 << std::endl;
                 // Get k from topology
-                    
-                std::cout << resonanceName << "OLineshape: " << Xlineshape(3.2) << " with s=" << 3.2<< std::endl;
+
+                if (outputInfo) std::cout << resonanceName << "OLineshape: " << Xlineshape(3.2) << " with s=" << 3.2<< std::endl;
 
 
                 auto Xcheck = func["x"];
@@ -624,8 +638,12 @@ void EvtThreeBodyDecays::createDecayModel( ){
                                               << valpoint << " calculated: "
                                               << calculatedValue << " expected: " << valvalue
                                               << std::endl;
-                                    std::cout << "FF" << formFactorFunc(valpoint)[0] << " " << formFactorFunc(valpoint)[1] << std::endl;
-                                    
+                                    if (outputInfo) std::cout << "FF" << formFactorFunc(valpoint)[0] << " " << formFactorFunc(valpoint)[1] << std::endl;
+                                    LineshapesValid = false;
+                                    invalidLineshapes.push_back(LineshapeName);
+                                }
+                                else {
+                                    if (outputInfo) std::cout << "Validation point matches for: " << LineshapeName << std::endl;
                                 }
                                 break;
                             }
@@ -636,74 +654,127 @@ void EvtThreeBodyDecays::createDecayModel( ){
                 }}
 
             }
-            else if( paramType.find( "_BuggBW" ) != std::string::npos ) {
-
-                if(paramType.find( "K700_BuggBW" ) != std::string::npos){
-                    Xlineshape = make_Bugg_BW_K700();
-                    lineshapeInitialized = true;
-                }
-
-                if(paramType.find( "K(700)_BuggBW" ) != std::string::npos){
-                    Xlineshape = make_Bugg_BW_K700_xic();
-                    lineshapeInitialized = true;
-                }
-
-
-
-                if(paramType.find( "K1430_BuggBW" ) != std::string::npos) {
-                    Xlineshape = make_Bugg_BW_K1430();
-                    lineshapeInitialized = true;
-                }
-
-                if(paramType.find( "K(1430)_BuggBW" ) != std::string::npos) {
-                    Xlineshape = make_Bugg_BW_K1430_xic();
-                    lineshapeInitialized = true;
-                }
-            }
+            
             else if (func["type"] == "BreitWignerMinL") {
                 double mass = func["mass"];
                 double width = func["width"];
                 int l = func["l"];
-                std::cout << "l: " << l << std::endl;
                 int minl = func["minL"];
-                std::cout << "minl: " << minl << std::endl;
                 double ma = func["m1"];
                 double mb = func["m2"];
                 double mm = func["m0"];
                 double mk = func["mk"];
-                std::cout << "BreitWignerMinL parameters: " << mass << " " << width << " " << l << " " << minl << " " << ma << " " << mb << " " << mm << " " << mk << std::endl;
 
                 auto formFactorFunc = createFormFactorFunction(chain, functions, mParent, m1, m2, m3);
 
-                std::cout << "Form factor function created." << std::endl;
                 int kint = topology[1].get<int>(); 
 
                 // Modifiziere das Breit-Wigner mit dem Formfaktor
                 auto originalBreitWigner = make_breit_wigner_minl(mass, width, l, minl, ma, mb, mk, mm);
-                Xlineshape = [originalBreitWigner, formFactorFunc](double s) -> complex {
-                    auto ff = formFactorFunc(s);
-                    return originalBreitWigner(s) * ff[0] * ff[1];
-                };
+                Xlineshape = originalBreitWigner;
 
-                MandelstamTuple sigma = {1.4,3.2,2.634279091379258};
-                std::cout << "BreitWignerMinL lineshape created." << originalBreitWigner(sigma[kint-1]) << std::endl;
-
+                
                 lineshapeInitialized = true;
-                std::cout << "BreitWignerMinL lineshape initialized." << std::endl;
 
                 /// Debug ///////////
                 //if(compjulia) std::cout << resonanceName << "FF " << formFactor1 << " " << formFactor2 << std::endl;
                 // Get k from topology
                     
 
-                        if(deubevt) EvtGenReport( EVTGEN_INFO, "EvtGen" ) << "INFO" << std::endl;
-                
-                if(deubevt) std::cout << resonanceName << std::endl;
-                if(deubevt) std::cout << "k: " << kint << std::endl;
-                if(deubevt) std::cout << mass << " " << width << std::endl;
-                if(deubevt) std::cout << "masses: " << ms[0] << " " << ms[1] << " "
+                if(deubevt or outputInfo) EvtGenReport( EVTGEN_INFO, "EvtGen" ) << "INFO" << std::endl;
+
+                if(deubevt or outputInfo) std::cout << resonanceName << std::endl;
+                if(deubevt or outputInfo) std::cout << "k: " << kint << std::endl;
+                if(deubevt or outputInfo) std::cout << mass << " " << width << std::endl;
+                if(deubevt or outputInfo) std::cout << "masses: " << ms[0] << " " << ms[1] << " "
                             << ms[2] << " " << ms[3] << std::endl;
-                if(deubevt) std::cout << "spins: " << spins[0] << " " << spins[1] << " "
+                if(deubevt or outputInfo) std::cout << "spins: " << spins[0] << " " << spins[1] << " "
+                            << spins[2] << " " << spins[3] << std::endl;
+
+
+                // Validations point check
+                auto Xcheck = func["x"];
+                
+
+                
+                bool checksumFound = false;
+                for ( const auto& check : misc["amplitude_model_checksums"] ) {
+                    if ( check["distribution"] == LineshapeName ) {
+                        checksumFound = true;
+                        
+                        auto valpoint_str = check["point"];
+                        auto valvalue_str = check["value"];
+                        
+                        complex valvalue = evtparseComplex(valvalue_str);
+                        
+                        bool pointFound = false;
+                        for ( const auto& point : parameterpoints ) {
+                            if ( point["name"] == valpoint_str ) {
+                                pointFound = true;                            
+                                auto valpoint = point["parameters"][0]["value"];
+                                complex calculatedValue = originalBreitWigner(valpoint);
+                                
+                                bool realmatches = std::abs(valvalue.real() - calculatedValue.real()) < 1e-6;
+                                bool imagmatches = std::abs(valvalue.imag() - calculatedValue.imag()) < 1e-6;
+                                
+                                if(!(realmatches && imagmatches)) {
+                                    EvtGenReport( EVTGEN_ERROR, "EvtGen" ) << "Validation point does not match for: " << LineshapeName << " "
+                                                << valpoint << " calculated: "
+                                                << calculatedValue << " expected: " << valvalue.real() << " + i*" << valvalue.imag()
+                                                << std::endl;
+                                    if (outputInfo) std::cout << "FF" << formFactorFunc(valpoint)[0] << " " << formFactorFunc(valpoint)[1] << std::endl;
+                                    LineshapesValid = false;
+                                    invalidLineshapes.push_back(LineshapeName);
+
+                                }
+                                else {
+                                    if (outputInfo) std::cout << "*** Validation point matches for: " << LineshapeName << " ***" << std::endl;
+                                }
+                                break;
+                            }
+                        }
+                    
+                        break;
+                    }
+                }
+                
+                
+            }
+            else if (func["type"] == "BuggBreitWignerMinL") {
+                double mass = func["mass"];
+                double width = func["width"];
+                double gamma = func["gamma"];
+                int l = func["l"];
+                int minl = func["minL"];
+                double ma = func["m1"];
+                double mb = func["m2"];
+                double mm = func["m0"];
+                double mk = func["mk"];
+
+                auto formFactorFunc = createFormFactorFunction(chain, functions, mParent, m1, m2, m3);
+
+                int kint = topology[1].get<int>(); 
+
+                // Modifiziere das Breit-Wigner mit dem Formfaktor
+                auto original_Lineshape = make_bugg_breit_wigner_minl(mass, width, gamma, l, minl, ma, mb, mk, mm);
+                Xlineshape = original_Lineshape;
+
+                
+                lineshapeInitialized = true;
+
+                /// Debug ///////////
+                //if(compjulia) std::cout << resonanceName << "FF " << formFactor1 << " " << formFactor2 << std::endl;
+                // Get k from topology
+                    
+
+                if(deubevt or outputInfo) EvtGenReport( EVTGEN_INFO, "EvtGen" ) << "INFO" << std::endl;
+
+                if(deubevt or outputInfo) std::cout << resonanceName << std::endl;
+                if(deubevt or outputInfo) std::cout << "k: " << kint << std::endl;
+                if(deubevt or outputInfo) std::cout << mass << " " << width << std::endl;
+                if(deubevt or outputInfo) std::cout << "masses: " << ms[0] << " " << ms[1] << " "
+                            << ms[2] << " " << ms[3] << std::endl;
+                if(deubevt or outputInfo) std::cout << "spins: " << spins[0] << " " << spins[1] << " "
                             << spins[2] << " " << spins[3] << std::endl;
 
 
@@ -724,7 +795,7 @@ void EvtThreeBodyDecays::createDecayModel( ){
                         for ( const auto& point : parameterpoints ) {
                             if ( point["name"] == valpoint_str ) {
                                 auto valpoint = point["parameters"][0]["value"];
-                                complex calculatedValue = originalBreitWigner(valpoint);
+                                complex calculatedValue = original_Lineshape(valpoint);
 
                                 // check if values match in 1e-6 precision
                                 // Use std::abs to compare complex numbers
@@ -735,9 +806,13 @@ void EvtThreeBodyDecays::createDecayModel( ){
                                               << valpoint << " calculated: "
                                               << calculatedValue << " expected: " << valvalue.real() << " + i*" << valvalue.imag()
                                               << std::endl;
-                                    std::cout << "FF" << formFactorFunc(valpoint)[0] << " " << formFactorFunc(valpoint)[1] << std::endl;
-
+                                    if (outputInfo) std::cout << "FF" << formFactorFunc(valpoint)[0] << " " << formFactorFunc(valpoint)[1] << std::endl;
+                                    LineshapesValid = false;
+                                    invalidLineshapes.push_back(LineshapeName);
                                     
+                                }
+                                else {
+                                    if (outputInfo) std::cout << "Validation point matches for: " << LineshapeName << std::endl;
                                 }
                                 break;
                             }
@@ -748,6 +823,190 @@ void EvtThreeBodyDecays::createDecayModel( ){
                 }
             }
 
+            else if (func["type"] == "Flatte1405") {
+                double mass = func["mass"];
+                double width = func["width"];
+                int l = func["l"];
+                int minl = func["minL"];
+                double ma = func["m1"];
+                double mb = func["m2"];
+                double mm = func["m0"];
+                double mk = func["mk"];
+
+                double g1 = func.contains("g1") ? func["g1"].get<double>() : 0.0;  
+                double g2 = func.contains("g2") ? func["g2"].get<double>() : 0.0;  
+
+                if(outputInfo) std::cout << "Flatte1405 g1: " << g1 << " g2: " << g2 << std::endl;
+                auto formFactorFunc = createFormFactorFunction(chain, functions, mParent, m1, m2, m3);
+
+                int kint = topology[1].get<int>(); 
+
+                // Modifiziere das Breit-Wigner mit dem Formfaktor
+                auto originalLineshape = make_flatte1405(mass, width, l, minl, ma, mb, mk, mm, g1, g2);
+                Xlineshape = originalLineshape;
+
+                
+                lineshapeInitialized = true;
+
+                /// Debug ///////////
+                //if(compjulia) std::cout << resonanceName << "FF " << formFactor1 << " " << formFactor2 << std::endl;
+                // Get k from topology
+                    
+
+                if(deubevt or outputInfo) EvtGenReport( EVTGEN_INFO, "EvtGen" ) << "INFO" << std::endl;
+
+                if(deubevt or outputInfo) std::cout << resonanceName << std::endl;
+                if(deubevt or outputInfo) std::cout << "k: " << kint << std::endl;
+                if(deubevt or outputInfo) std::cout << mass << " " << width << std::endl;
+                if(deubevt or outputInfo) std::cout << "masses: " << ms[0] << " " << ms[1] << " "
+                            << ms[2] << " " << ms[3] << std::endl;
+                if(deubevt or outputInfo) std::cout << "spins: " << spins[0] << " " << spins[1] << " "
+                            << spins[2] << " " << spins[3] << std::endl;
+
+
+                // Validations point check
+                auto Xcheck = func["x"];
+                
+
+                // check if LineshapeName is in "misc": {"amplitude_model_checksums": [
+                for ( const auto& check : misc["amplitude_model_checksums"] ) {
+                    // Check if the name matches the LineshapeName
+                    if ( check["distribution"] == LineshapeName ) {
+                        auto valpoint_str = check["point"];
+                        auto valvalue_str = check["value"];
+                        complex valvalue = evtparseComplex(valvalue_str);
+                      
+                        // search for valpoint_str in  "parameter_points": [
+
+                        for ( const auto& point : parameterpoints ) {
+                            if ( point["name"] == valpoint_str ) {
+                                auto valpoint = point["parameters"][0]["value"];
+                                complex calculatedValue = originalLineshape(valpoint);
+
+                                // check if values match in 1e-6 precision
+                                // Use std::abs to compare complex numbers
+                                bool realmatches = std::abs(valvalue.real() - calculatedValue.real()) < 1e-6;
+                                bool imagmatches = std::abs(valvalue.imag() - calculatedValue.imag()) < 1e-6;
+                                if(!(realmatches && imagmatches)) {
+                                    EvtGenReport( EVTGEN_ERROR, "EvtGen" ) << "Validation point does not match for: " << LineshapeName << " "
+                                              << valpoint << " calculated: "
+                                              << calculatedValue << " expected: " << valvalue.real() << " + i*" << valvalue.imag()
+                                              << std::endl;
+                                    if (outputInfo) std::cout << "FF" << formFactorFunc(valpoint)[0] << " " << formFactorFunc(valpoint)[1] << std::endl;
+                                    LineshapesValid = false;
+                                    invalidLineshapes.push_back(LineshapeName);
+                                    
+                                }
+                                else {
+                                    if (outputInfo) std::cout << "Validation point matches for: " << LineshapeName << std::endl;
+                                }
+                                break;
+                            }
+                            
+                        }
+                        break;
+                    }
+                }
+            }
+            
+            else if (func["type"] == "L1670Flatte") {
+                double mass = func["mass"];
+                double width = func["width"];
+                int l = func["l"];
+                int minl = func["minL"];
+                double ma = func["m1"];
+                double mb = func["m2"];
+                double mm = func["m0"];
+                double mk = func["mk"];
+
+                auto formFactorFunc = createFormFactorFunction(chain, functions, mParent, m1, m2, m3);
+
+                int kint = topology[1].get<int>(); 
+
+                // Modifiziere das Breit-Wigner mit dem Formfaktor
+                auto originalLineshape = make_l1670_flatte(mass, width, l, minl, ma, mb, mk, mm);
+                Xlineshape = originalLineshape;
+
+                
+                lineshapeInitialized = true;
+
+                /// Debug ///////////
+                //if(compjulia) std::cout << resonanceName << "FF " << formFactor1 << " " << formFactor2 << std::endl;
+                // Get k from topology
+                    
+
+                if(deubevt or outputInfo) EvtGenReport( EVTGEN_INFO, "EvtGen" ) << "INFO" << std::endl;
+
+                if(deubevt or outputInfo) std::cout << resonanceName << std::endl;
+                if(deubevt or outputInfo) std::cout << "k: " << kint << std::endl;
+                if(deubevt or outputInfo) std::cout << mass << " " << width << std::endl;
+                if(deubevt or outputInfo) std::cout << "masses: " << ms[0] << " " << ms[1] << " "
+                            << ms[2] << " " << ms[3] << std::endl;
+                if(deubevt or outputInfo) std::cout << "spins: " << spins[0] << " " << spins[1] << " "
+                            << spins[2] << " " << spins[3] << std::endl;
+
+
+                // Validations point check
+                auto Xcheck = func["x"];
+                
+
+                // check if LineshapeName is in "misc": {"amplitude_model_checksums": [
+                for ( const auto& check : misc["amplitude_model_checksums"] ) {
+                    // Check if the name matches the LineshapeName
+                    if ( check["distribution"] == LineshapeName ) {
+                        auto valpoint_str = check["point"];
+                        auto valvalue_str = check["value"];
+                        complex valvalue = evtparseComplex(valvalue_str);
+                      
+                        // search for valpoint_str in  "parameter_points": [
+
+                        for ( const auto& point : parameterpoints ) {
+                            if ( point["name"] == valpoint_str ) {
+                                auto valpoint = point["parameters"][0]["value"];
+                                complex calculatedValue = originalLineshape(valpoint);
+
+                                // check if values match in 1e-6 precision
+                                // Use std::abs to compare complex numbers
+                                bool realmatches = std::abs(valvalue.real() - calculatedValue.real()) < 1e-6;
+                                bool imagmatches = std::abs(valvalue.imag() - calculatedValue.imag()) < 1e-6;
+                                if(!(realmatches && imagmatches)) {
+                                    EvtGenReport( EVTGEN_ERROR, "EvtGen" ) << "Validation point does not match for: " << LineshapeName << " "
+                                              << valpoint << " calculated: "
+                                              << calculatedValue << " expected: " << valvalue.real() << " + i*" << valvalue.imag()
+                                              << std::endl;
+                                    if (outputInfo) std::cout << "FF" << formFactorFunc(valpoint)[0] << " " << formFactorFunc(valpoint)[1] << std::endl;
+                                    LineshapesValid = false;
+                                    invalidLineshapes.push_back(LineshapeName);
+                                    
+                                }
+                                else {
+                                    if (outputInfo) std::cout << "Validation point matches for: " << LineshapeName << std::endl;
+                                }
+                                break;
+                            }
+                            
+                        }
+                        break;
+                    }
+                }
+            }
+
+            else if( paramType.find( "_BuggBW" ) != std::string::npos ) {
+
+                if(paramType.find( "K700_BuggBW" ) != std::string::npos){
+                    Xlineshape = make_Bugg_BW_K700();
+                    lineshapeInitialized = true;
+                }
+
+
+
+                if(paramType.find( "K1430_BuggBW" ) != std::string::npos) {
+                    Xlineshape = make_Bugg_BW_K1430();
+                    lineshapeInitialized = true;
+                }
+
+            }
+
 
 
 
@@ -756,7 +1015,7 @@ void EvtThreeBodyDecays::createDecayModel( ){
             ThreeBodyParities Ps = {'+', '-', '-', '+'};
 
             if (!lineshapeInitialized) {
-                std::cout << "Warnung: Unbekannter Lineshape-Typ für Resonanz " << resonanceName 
+                if (outputInfo) std::cout << "Warnung: Unbekannter Lineshape-Typ für Resonanz " << resonanceName
                         << ": " << paramType << std::endl;
                 // Fallback-Initialisierung
                 Xlineshape = [](double s) -> complex { return complex(1.0, 0.0); };
@@ -810,9 +1069,17 @@ void EvtThreeBodyDecays::createDecayModel( ){
 
 
         }
-
+    
+    if(!LineshapesValid) {
+        EvtGenReport( EVTGEN_ERROR, "EvtGen" ) << "\n \nOne or more lineshape validation points did not match." << std::endl;
+        for(const auto& name : invalidLineshapes) {
+            EvtGenReport( EVTGEN_ERROR, "EvtGen" ) << " Invalid lineshape: " << name << std::endl;
+        }
+        std::cout << "Exiting. \n \n \n" << std::endl;
+        //exit(1);
+    }
     // Set the decay model
-    decayModel = std::make_unique<ThreeBodyAmplitudeModel>(model);
+    std::unique_ptr<ThreeBodyAmplitudeModel> Model = std::make_unique<ThreeBodyAmplitudeModel>(model);
 
     double m12_sq = 3.2;
     double m23_sq = 1.4;
@@ -824,55 +1091,55 @@ void EvtThreeBodyDecays::createDecayModel( ){
     MandelstamTuple valpointsJulia = {1.5,3.2,1.6714505793792584};
 
 
-    double intens = decayModel->intensity(valpoints, 1);
+    double intens = Model->intensity(valpoints, 1);
 
+    Tensor4Dcomp valamp = Model->amplitude4d(valpoints, 1);
 
+    double intensity_valpoint = 0.0;
+    for ( int i = 0; i < valamp.size(); ++i ) {
+        for ( int j = 0; j < valamp[0].size(); ++j ) {
+            for ( int k = 0; k < valamp[0][0].size(); ++k ) {
+                for ( int z = 0; z < valamp[0][0][0].size(); ++z ) {
+                    intensity_valpoint += std::norm(valamp[i][j][k][z]);
+                }
+            }
+        } 
+    }
+    std::cout << "Intensity at validation point from amplitude tensosr: " << abs(intensity_valpoint*intensity_valpoint) << std::endl;
 
-    std::cout << "Initial intensity: " << intens << std::endl;
+    if (outputInfo) std::cout << "Initial intensity: " << intens << std::endl;
 
+    bool ampout = true;
 
-    if(compjulia ) {
+    if(compjulia or ampout) {
         MandelstamTuple σs = {1.5,3.2,1.6714505793792584};
         //σs = {5.,10.,17.707293};
-                        σs = {1.5,3.2,2.5342790913792586};
-                        σs = {1.4,3.2,2.634279091379258};
+                        //σs = {1.5,3.2,2.5342790913792586};
+                        //σs = {1.4,3.2,2.634279091379258};
 
 
-        Tensor4Dcomp amp = decayModel->amplitude4d(σs, 1);
-    size_t dim1 = amp.size();
-    size_t dim2 = dim1 > 0 ? amp[0].size() : 0;
-    size_t dim3 = dim2 > 0 ? amp[0][0].size() : 0;
-    size_t dim4 = dim3 > 0 ? amp[0][0][0].size() : 0;
+        Tensor4Dcomp amp = Model->amplitude4d(σs, 1);
+        size_t dim1 = amp.size();
+        size_t dim2 = dim1 > 0 ? amp[0].size() : 0;
+        size_t dim3 = dim2 > 0 ? amp[0][0].size() : 0;
+        size_t dim4 = dim3 > 0 ? amp[0][0][0].size() : 0;
 
-    
-
-    
-    if (dim1 == 2 && dim2 == 1 && dim3 == 1 && dim4 == 2) {
-        vertex(0, 0, EvtComplex(amp[0][0][0][0].real(), amp[0][0][0][0].imag()));
-        vertex(0, 1, EvtComplex(amp[0][0][0][1].real(), amp[0][0][0][1].imag()));
-        vertex(1, 0, EvtComplex(amp[1][0][0][0].real(), amp[1][0][0][0].imag()));
-        vertex(1, 1, EvtComplex(amp[1][0][0][1].real(), amp[1][0][0][1].imag()));
-    }
+        double test_intens = Model->intensity(σs, 1);
+        if (outputInfo) std::cout << "Test intensity from amplitude tensor: " << test_intens << std::endl;
 
 
-
-
-
-
-
-    bool ampout = false;
     if(deubevt or ampout or compjulia) {
     // Print the amplitude tensor
     EvtGenReport( EVTGEN_INFO, "EvtGen" ) << "RESULT" << std::endl;
-    std::cout << "Amplitude tensor:" << std::endl;
+    if (outputInfo) std::cout << "Amplitude tensor:" << std::endl;
     for ( int i = 0; i < amp.size(); ++i ) {
         for ( int j = 0; j < amp[0].size(); ++j ) {
             for ( int k = 0; k < amp[0][0].size(); ++k ) {
                 for ( int z = 0; z < amp[0][0][0].size(); ++z ) {
-                    std::cout << i << j << k << z<< amp[i][j][k][z] << "\t";    // Tab für schöne Ausrichtung                }
+                    if (outputInfo) std::cout << i << j << k << z<< amp[i][j][k][z] << "\t";    // Tab für schöne Ausrichtung                }
             }
         }
-        std::cout << "\n";
+        if (outputInfo) std::cout << "\n";
     }
     }}
     }
@@ -880,7 +1147,7 @@ void EvtThreeBodyDecays::createDecayModel( ){
 
     
 
-
+    return Model;
     
 
 }
@@ -921,6 +1188,17 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     double m2 = pDaug2.mass();
     double m3 = pDaug3.mass();
 
+  /*  auto final_state = decayDescription["kinematics"]["final_state"];
+    auto initial_state = decayDescription["kinematics"]["initial_state"];
+
+     mMother = initial_state["mass"];
+     m1 = final_state[0]["mass"];
+     m2 = final_state[1]["mass"];
+     m3 = final_state[2]["mass"];
+*/
+
+
+
  
    
     // Calculate proper kinematic boundaries
@@ -939,12 +1217,21 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
 
     // More restrictive Dalitz plot boundaries
     bool kinematically_allowed = true;
+    bool kin_debug = false;
     double tolerance = 1e-6;
-
+    if(kin_debug){
+    std::cout << "DEBUG: Checking kinematic bounds..." << std::endl;
+    std::cout << "s12: " << s12 << " vs [" << s12_min - tolerance << ", " << s12_max + tolerance << "]" << std::endl;
+    std::cout << "s23: " << s23 << " vs [" << s23_min - tolerance << ", " << s23_max + tolerance << "]" << std::endl;
+    std::cout << "s31: " << s31 << " vs [" << s31_min - tolerance << ", " << s31_max + tolerance << "]" << std::endl;
+    
     if (s12 < s12_min - tolerance || s12 > s12_max + tolerance ||
         s23 < s23_min - tolerance || s23 > s23_max + tolerance ||
         s31 < s31_min - tolerance || s31 > s31_max + tolerance) {
         kinematically_allowed = false;
+        std::cout << "DEBUG: Kinematic check FAILED" << std::endl;
+    } else {
+        std::cout << "DEBUG: Kinematic check PASSED" << std::endl;
     }
 
     if (!kinematically_allowed) {
@@ -952,23 +1239,27 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
         std::cout << "s12: " << s12 << " [" << s12_min << ", " << s12_max << "]" << std::endl;
         std::cout << "s23: " << s23 << " [" << s23_min << ", " << s23_max << "]" << std::endl;
         std::cout << "s31: " << s31 << " [" << s31_min << ", " << s31_max << "]" << std::endl;
-        std::cout << "Actual masses: M=" << mMother << ", m1=" << m1 << ", m2=" << m2 << ", m3=" << m3 << std::endl;
+        std::cout << "RETURNING EARLY!" << std::endl;
         return; // Actually exit here
+    } else {
+        std::cout << "DEBUG: Proceeding with amplitude calculation" << std::endl;
     }
-
+    }
+    // ...existing code...
 
     MandelstamTuple σs = {s23, s31, s12};
     //σs = {s31, s23, s12}; // Permutation to match the expected order in the model
+    //σs = {s12, s23, s31}; // Permutation to match the expected order in the model
 
     /*
     if(compjulia ) {
         σs = {1.5,3.2,1.6714505793792584};
         //σs = {5.,10.,17.707293};
         σs = {1.5,3.2,2.5342790913792586};
+        σs = {1.4,3.2,2.634279091379258};
 
     }*/
     // Test point(σ1 = 0.7980703453578917, σ2 = 3.6486261122281745, σ3 = 2.7875826337931926)
-    σs = {1.4,3.2,2.634279091379258};
 
 
 
@@ -987,6 +1278,7 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     size_t dim2 = dim1 > 0 ? amp[0].size() : 0;
     size_t dim3 = dim2 > 0 ? amp[0][0].size() : 0;
     size_t dim4 = dim3 > 0 ? amp[0][0][0].size() : 0;
+
 
     if(std::isnan(amp[0][0][0][0].real())){
         std::cout << "Amplitude tensor contains NaN values!" << std::endl;
@@ -1015,12 +1307,24 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
     }
 
 
+    if(dim1 == 2 && dim2 == 1 && dim3 == 3 && dim4 == 2) {
+        vertex(0, 0, 0, EvtComplex(amp[0][0][0][0].real(), amp[0][0][0][0].imag()));
+        vertex(0, 0, 1, EvtComplex(amp[0][0][0][1].real(), amp[0][0][0][1].imag()));
+        vertex(0, 1, 0, EvtComplex(amp[0][0][1][0].real(), amp[0][0][1][0].imag()));
+        vertex(0, 1, 1, EvtComplex(amp[0][0][1][1].real(), amp[0][0][1][1].imag()));
+        vertex(0, 2, 0, EvtComplex(amp[0][0][2][0].real(), amp[0][0][2][0].imag()));
+        vertex(0, 2, 1, EvtComplex(amp[0][0][2][1].real(), amp[0][0][2][1].imag()));
+        vertex(1, 0, 0, EvtComplex(amp[1][0][0][0].real(), amp[1][0][0][0].imag()));
+        vertex(1, 0, 1, EvtComplex(amp[1][0][0][1].real(), amp[1][0][0][1].imag()));
+        vertex(1, 1, 0, EvtComplex(amp[1][0][1][0].real(), amp[1][0][1][0].imag()));
+        vertex(1, 1, 1, EvtComplex(amp[1][0][1][1].real(), amp[1][0][1][1].imag()));
+        vertex(1, 2, 0, EvtComplex(amp[1][0][2][0].real(), amp[1][0][2][0].imag()));
+        vertex(1, 2, 1, EvtComplex(amp[1][0][2][1].real(), amp[1][0][2][1].imag()));
+    }
 
 
 
-
-
-    bool ampout = true;
+    bool ampout = false;
     if(deubevt or ampout or compjulia) {
     // Print the amplitude tensor
     EvtGenReport( EVTGEN_INFO, "EvtGen" ) << "RESULT" << std::endl;
@@ -1040,7 +1344,7 @@ void EvtThreeBodyDecays::decay( EvtParticle* p )
 
     if(fractionout) calculateIntensities(*decayModel, σs);
     
-    createDecayModel( );
+    //createDecayModel( );
     
 
 
@@ -1077,7 +1381,7 @@ std::function<std::array<double, 2>(double)> EvtThreeBodyDecays::createFormFacto
                 FFConfig config;
                 config.radius = ff.contains("radius") ? ff["radius"].get<double>() : 1.0;
                 config.L = ff["l"];
-                std::cout << "Formfactor for vertex with L=" << config.L << " and radius=" << config.radius << std::endl;
+                //std::cout << "Formfactor for vertex with L=" << config.L << " and radius=" << config.radius << std::endl;
                 config.type = ff.contains("type") ? ff["type"].get<std::string>() : "BlattWeisskopf";
                 config.isFirstLevel = vertex["node"].is_array() && vertex["node"][0].is_array();
                 

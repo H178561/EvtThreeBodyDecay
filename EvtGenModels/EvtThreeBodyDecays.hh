@@ -29,6 +29,8 @@ class EvtThreeBodyDecays : public EvtDecayAmp {
     void initProbMax();
     void decay( EvtParticle* p );
 
+    std::unique_ptr<ThreeBodyAmplitudeModel> createDecayModel( json decayData , bool outputInfo = true);
+
   protected:
     
 
@@ -37,7 +39,7 @@ class EvtThreeBodyDecays : public EvtDecayAmp {
     nlohmann::json decayDescription;
     std::map<std::string, nlohmann::json> functions;
     nlohmann::json domains;
-    nlohmann::json misc;
+    
     nlohmann::json parameterpoints;
 
     std::unique_ptr<ThreeBodyAmplitudeModel> decayModel;
@@ -53,7 +55,7 @@ class EvtThreeBodyDecays : public EvtDecayAmp {
     const std::map<std::string, nlohmann::json>& functions,
     double mParent, double m1, double m2, double m3);
 
-    void createDecayModel(  );
+    
 
 
 
